@@ -1,0 +1,2432 @@
+/* USER CODE BEGIN Header */
+/**
+ ******************************************************************************
+ * @file           : main.c
+ * @brief          : Main program body
+ ******************************************************************************
+ * @attention
+ *
+ * Copyright (c) 2026 STMicroelectronics.
+ * All rights reserved.
+ *
+ * This software is licensed under terms that can be found in the LICENSE file
+ * in the root directory of this software component.
+ * If no LICENSE file comes with this software, it is provided AS-IS.
+ *
+ ******************************************************************************
+ */
+/* USER CODE END Header */
+/* Includes ------------------------------------------------------------------*/
+#include "main.h"
+
+/* Private includes ----------------------------------------------------------*/
+/* USER CODE BEGIN Includes */
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <math.h>
+
+/* USER CODE END Includes */
+
+/* Private typedef -----------------------------------------------------------*/
+/* USER CODE BEGIN PTD */
+typedef struct {
+	int steps;
+	float steps_per_second; // Changed back from RPS
+} StepperOutput;
+
+typedef enum {
+	MOVE_EXACT_STEPS, MOVE_SEEK_BUTT, MOVE_SEEK_TOP
+} LeadMoveMode;
+/* USER CODE END PTD */
+
+/* Private define ------------------------------------------------------------*/
+/* USER CODE BEGIN PD */
+// ALL GPIO PINS DEFINED
+// --- LEAD SCREW PINS (GREEN) ---
+#define STEP_LEAD_PIN        GPIO_PIN_5
+#define STEP_LEAD_PORT       GPIOB
+#define DIR_LEAD_PIN         GPIO_PIN_4
+#define DIR_LEAD_PORT        GPIOB
+#define EN_LEAD_PIN          GPIO_PIN_1
+#define EN_LEAD_PORT         GPIOB
+#define LEAD_M0_PIN          GPIO_PIN_13
+#define LEAD_M0_PORT         GPIOB
+#define LEAD_M1_PIN          GPIO_PIN_14
+#define LEAD_M1_PORT         GPIOB
+#define LEAD_M2_PIN          GPIO_PIN_15
+#define LEAD_M2_PORT         GPIOB
+
+// --- TRAY PINS (BLUE) ---
+#define STEP_TRAY_PIN        GPIO_PIN_4
+#define STEP_TRAY_PORT       GPIOA
+#define DIR_TRAY_PIN         GPIO_PIN_3
+#define DIR_TRAY_PORT        GPIOC
+#define EN_TRAY_PIN          GPIO_PIN_1
+#define EN_TRAY_PORT         GPIOA
+#define TRAY_M0_PIN          GPIO_PIN_0
+#define TRAY_M0_PORT         GPIOC
+#define TRAY_M1_PIN          GPIO_PIN_1
+#define TRAY_M1_PORT         GPIOC
+#define TRAY_M2_PIN          GPIO_PIN_2
+#define TRAY_M2_PORT         GPIOC
+
+// --- SENSORS (ORANGE) ---
+#define LEAD_LIMIT_TOP_PIN   GPIO_PIN_11
+#define LEAD_LIMIT_TOP_PORT  GPIOC
+#define LEAD_LIMIT_BTM_PIN   GPIO_PIN_2
+#define LEAD_LIMIT_BTM_PORT  GPIOD
+#define TRAY_HALL_PIN        GPIO_PIN_10
+#define TRAY_HALL_PORT       GPIOC
+#define SYRINGE_BUTT_PIN     GPIO_PIN_12
+#define SYRINGE_BUTT_PORT    GPIOC
+
+// All colors defined
+#define ILI9341_COLOR_BLACK       0x0000
+#define ILI9341_COLOR_WHITE       0xFFFF
+#define ILI9341_COLOR_HALO        0x07FF // Cyan-ish Halo
+#define ILI9341_COLOR_TEXT        0xFFFF // White main text
+#define ILI9341_COLOR_GRAY        0x7BEF
+#define ILI9341_COLOR_BLUE        0x001F
+#define ILI9341_COLOR_DARKGRAY    0x3186
+#define COLOR_BG      0x000F  // Near Black
+#define COLOR_CARD    0x2104  // Dark Slate
+#define COLOR_ACCENT  0xCE59  // Soft Gold / Brass
+#define COLOR_GREEN   0x4666  // Emerald Green
+#define COLOR_RED     0x9000  // Deep Crimson (less jarring than pure red)
+
+//All letters of the alphabet defined
+const uint8_t font_chars[26][5] = { { 0x7E, 0x11, 0x11, 0x11, 0x7E }, // A
+		{ 0x7F, 0x49, 0x49, 0x49, 0x36 }, // B
+		{ 0x3E, 0x41, 0x41, 0x41, 0x22 }, // C
+		{ 0x7F, 0x41, 0x41, 0x22, 0x1C }, // D
+		{ 0x7F, 0x49, 0x49, 0x49, 0x41 }, // E
+		{ 0x7F, 0x09, 0x09, 0x09, 0x01 }, // F
+		{ 0x3E, 0x41, 0x49, 0x49, 0x7A }, // G
+		{ 0x7F, 0x08, 0x08, 0x08, 0x7F }, // H
+		{ 0x00, 0x41, 0x7F, 0x41, 0x00 }, // I
+		{ 0x20, 0x40, 0x41, 0x3F, 0x01 }, // J
+		{ 0x7F, 0x08, 0x14, 0x22, 0x41 }, // K
+		{ 0x7F, 0x40, 0x40, 0x40, 0x40 }, // L
+		{ 0x7F, 0x02, 0x0C, 0x02, 0x7F }, // M
+		{ 0x7F, 0x04, 0x08, 0x10, 0x7F }, // N
+		{ 0x3E, 0x41, 0x41, 0x41, 0x3E }, // O
+		{ 0x7F, 0x09, 0x09, 0x09, 0x06 }, // P
+		{ 0x3E, 0x41, 0x51, 0x21, 0x5E }, // Q
+		{ 0x7F, 0x09, 0x19, 0x29, 0x46 }, // R
+		{ 0x46, 0x49, 0x49, 0x49, 0x31 }, // S
+		{ 0x01, 0x01, 0x7F, 0x01, 0x01 }, // T
+		{ 0x3F, 0x40, 0x40, 0x40, 0x3F }, // U
+		{ 0x1F, 0x20, 0x40, 0x20, 0x1F }, // V
+		{ 0x3F, 0x40, 0x38, 0x40, 0x3F }, // W
+		{ 0x63, 0x14, 0x08, 0x14, 0x63 }, // X
+		{ 0x07, 0x08, 0x70, 0x08, 0x07 }, // Y
+		{ 0x61, 0x51, 0x49, 0x45, 0x43 }  // Z
+};
+
+const uint8_t font_chars_low[26][5] = { { 0x20, 0x54, 0x54, 0x54, 0x78 }, // a
+		{ 0x7F, 0x48, 0x44, 0x44, 0x38 }, // b
+		{ 0x38, 0x44, 0x44, 0x44, 0x20 }, // c
+		{ 0x38, 0x44, 0x44, 0x48, 0x7F }, // d
+		{ 0x38, 0x54, 0x54, 0x54, 0x18 }, // e
+		{ 0x08, 0x7E, 0x09, 0x01, 0x02 }, // f
+		{ 0x0C, 0x52, 0x52, 0x52, 0x3E }, // g
+		{ 0x7F, 0x08, 0x04, 0x04, 0x78 }, // h
+		{ 0x00, 0x44, 0x7D, 0x40, 0x00 }, // i
+		{ 0x20, 0x40, 0x44, 0x3D, 0x00 }, // j
+		{ 0x7F, 0x10, 0x28, 0x44, 0x00 }, // k
+		{ 0x00, 0x41, 0x7F, 0x40, 0x00 }, // l
+		{ 0x7C, 0x04, 0x18, 0x04, 0x78 }, // m
+		{ 0x7C, 0x08, 0x04, 0x04, 0x78 }, // n
+		{ 0x38, 0x44, 0x44, 0x44, 0x38 }, // o
+		{ 0x7C, 0x14, 0x14, 0x14, 0x08 }, // p
+		{ 0x08, 0x14, 0x14, 0x18, 0x7C }, // q
+		{ 0x7C, 0x08, 0x04, 0x04, 0x08 }, // r
+		{ 0x48, 0x54, 0x54, 0x54, 0x20 }, // s
+		{ 0x04, 0x3F, 0x44, 0x40, 0x20 }, // t
+		{ 0x3C, 0x40, 0x40, 0x20, 0x7C }, // u
+		{ 0x1C, 0x20, 0x40, 0x20, 0x1C }, // v
+		{ 0x3C, 0x40, 0x30, 0x40, 0x3C }, // w
+		{ 0x44, 0x28, 0x10, 0x28, 0x44 }, // x
+		{ 0x0C, 0x50, 0x50, 0x50, 0x3C }, // y
+		{ 0x44, 0x64, 0x54, 0x4C, 0x44 }  // z
+};
+
+const uint8_t font_nums[14][5] = { { 0x3E, 0x51, 0x49, 0x45, 0x3E }, // 0
+		{ 0x00, 0x42, 0x7F, 0x40, 0x00 }, // 1
+		{ 0x42, 0x61, 0x51, 0x49, 0x46 }, // 2
+		{ 0x21, 0x41, 0x45, 0x4B, 0x31 }, // 3
+		{ 0x18, 0x14, 0x12, 0x7F, 0x10 }, // 4
+		{ 0x27, 0x45, 0x45, 0x45, 0x39 }, // 5
+		{ 0x3C, 0x4A, 0x49, 0x49, 0x30 }, // 6
+		{ 0x01, 0x71, 0x09, 0x05, 0x03 }, // 7
+		{ 0x36, 0x49, 0x49, 0x49, 0x36 }, // 8
+		{ 0x06, 0x49, 0x49, 0x29, 0x1E }, // 9
+		{ 0x00, 0x60, 0x60, 0x00, 0x00 }, // 10: . (Decimal)
+		{ 0x08, 0x08, 0x08, 0x08, 0x08 }, // 11: - (Minus/Hyphen)
+		{ 0x08, 0x1C, 0x36, 0x63, 0x00 },  // 12: < (Backspace Arrow)
+		{ 0x02, 0x01, 0x51, 0x09, 0x06 }  // 13: ? (Question Mark)
+};
+/* USER CODE END PD */
+
+/* Private macro -------------------------------------------------------------*/
+/* USER CODE BEGIN PM */
+
+/* USER CODE END PM */
+
+/* Private variables ---------------------------------------------------------*/
+SPI_HandleTypeDef hspi1;
+
+TIM_HandleTypeDef htim3;
+
+UART_HandleTypeDef huart2;
+
+/* USER CODE BEGIN PV */
+//MOTOR CODE
+// Initialization
+volatile int lead_steps_remaining = 0;
+volatile uint8_t lead_is_moving = 0;
+volatile uint8_t lead_dir = 0; // 1 = CW (Down), 0 = CCW (Up)
+volatile LeadMoveMode lead_mode = MOVE_EXACT_STEPS;
+volatile int tray_steps_remaining = 0;
+volatile uint8_t tray_is_moving = 0;
+volatile uint8_t tray_homing = 0;
+volatile uint8_t tray_clear = 0;
+int volume_unit_index = 0;
+int sim = 0; // 0 => hardware and 1 => simulation
+int saved_recipe_count = 0;
+float new_time = 0;
+
+//const values for easier programming
+float steps_per_rev_lead = 3200.0f;
+float moveup_speed = 24000.0f;
+float movedown_speed = 20000.0f;
+float min_tray_rps = 0.05f;
+float max_tray_rps = 0.15f;
+
+//SCREEN CODE
+typedef enum {
+	MENU_MAIN,
+	MENU_NEW_SYNTHESIS,
+	MENU_NUMPAD,
+	MENU_RUNNING,
+	MENU_PAUSED,
+	MENU_FINISHED,
+	MENU_KEYBOARD,
+	MENU_LOAD,
+	MENU_CONFIRM
+} ScreenState;
+ScreenState currentState = MENU_MAIN;
+
+typedef struct {
+	char name[16];
+	float syringe_diams[8];
+	float volume_mls[8];
+	float flow_rates[8];
+	float time_breaks[8];
+	// Unit indices from your global unit arrays
+	uint8_t diam_unit_indices[8];
+	uint8_t vol_unit_indices[8];
+	uint8_t flow_time_indices[8]; // For /s vs /h toggles
+	uint8_t time_unit_indices[8];
+} Recipe;
+Recipe tempSave;
+Recipe recipeDatabase[5]; // Store up to 5 recipes in RAM/Flash
+char keyboard_buffer[17];
+
+// Arrays for 8 fluids
+float syringe_diams[8];
+float volume_mls[8];
+float flow_rates[8];
+float time_breaks[8];
+
+// Unit Indices stored per fluid (8 slots)
+int diam_unit_indices[8] = { 0, 0, 0, 0, 0, 0, 0, 0 };
+int vol_unit_indices[8] = { 1, 1, 1, 1, 1, 1, 1, 1 }; // Default to mL
+int flow_time_indices[8] = { 1, 1, 1, 1, 1, 1, 1, 1 }; // Default to mL/h
+int time_unit_indices[8] = { 0, 0, 0, 0, 0, 0, 0, 0 };
+
+// Labels (keep these as const)
+const char *diam_units[] = { "mm", "um" };
+const char *vol_units[] = { "mL", "uL" };
+const char *time_units[] = { "sec", "min", "hr " };
+
+int current_fluid_idx = 0;
+char numpad_buffer[10] = "";
+
+typedef enum {
+	EDIT_NONE, EDIT_DIAM, EDIT_VOL, EDIT_FLOW, EDIT_TIME
+} EditTarget;
+EditTarget currentEdit = EDIT_NONE;
+/* USER CODE END PV */
+
+/* Private function prototypes -----------------------------------------------*/
+void SystemClock_Config(void);
+static void MX_GPIO_Init(void);
+static void MX_USART2_UART_Init(void);
+static void MX_SPI1_Init(void);
+static void MX_TIM3_Init(void);
+/* USER CODE BEGIN PFP */
+
+/* USER CODE END PFP */
+
+/* Private user code ---------------------------------------------------------*/
+/* USER CODE BEGIN 0 */
+/*--------------------------------------------------MOTOR FUNCTIONS-------------------------------------------*/
+StepperOutput CalculateStepper(float syringe_diameter, int diam_idx,
+		float volume, int vol_idx, float flowrate, int flow_time_idx) {
+	StepperOutput result;
+
+	// 1. Convert Diameter to mm
+	float diameter_mm = syringe_diameter;
+	//Case: um
+	if (diam_idx == 1) {
+		diameter_mm = syringe_diameter / 1000.0f;
+	}
+
+	// 2. conversions for flowrate of diff units
+	float volume_ml = volume;
+	//case: uL/sec
+	if (vol_idx == 1 && flow_time_idx == 0) {
+		volume_ml = volume / 1000.0f;
+		flowrate = flowrate / 1000.0f;
+	}
+	//Case: uL/hr
+	else if (vol_idx == 1 && flow_time_idx == 1) {
+		volume_ml = volume / 1000.0f;
+		flowrate = flowrate / 1000.0f;
+		flowrate = flowrate / 3600.0f;
+	}
+	//Case: mL/hr
+	else if (vol_idx == 0 && flow_time_idx == 1) {
+		flowrate = flowrate / 3600.0f;
+	}
+
+	// 3. Convert Flow Rate to mL/sec
+	float flowrate_ml_per_s = flowrate;
+
+	// --- Core Calculations ---
+	float area = M_PI * pow((diameter_mm / 2.0f), 2);
+
+	// displacement (mm) = (volume in mm^3) / area (1 mL = 1000 mm^3)
+	float displacement_mm = (volume_ml * 1000.0f) / area;
+	float lead_screw_pitch = 4.0f;
+
+	// Ensure steps_per_rev_lead is defined globally as 3200.0f
+	result.steps = (int) ((displacement_mm / lead_screw_pitch)
+			* steps_per_rev_lead);
+
+	// Calculate pulse frequency (steps per second)
+	float rps = (flowrate_ml_per_s * 1000.0f) / area / lead_screw_pitch;
+	result.steps_per_second = rps * steps_per_rev_lead;
+
+	return result;
+}
+
+// Sets hardware timer frequency based on steps per second
+void StartLeadMotorTimer(float steps_per_second, uint8_t direction) {
+	HAL_TIM_Base_Stop_IT(&htim3);
+
+	// Math: Period (ARR) = (Timer Clock / Steps Per Second) - 1
+	// Assuming 1 MHz timer clock (PSC set to 83 for 84MHz clock)
+	uint32_t arr_val = (uint32_t) (1000000.0f / steps_per_second) - 1;
+
+	__HAL_TIM_SET_AUTORELOAD(&htim3, arr_val);
+	__HAL_TIM_SET_COUNTER(&htim3, 0);
+
+	// Hardware Pin setup
+	HAL_GPIO_WritePin(DIR_LEAD_PORT, DIR_LEAD_PIN, direction);
+	HAL_GPIO_WritePin(EN_LEAD_PORT, EN_LEAD_PIN, GPIO_PIN_RESET); // Enable ON
+
+	lead_dir = direction;
+	lead_is_moving = 1;
+	HAL_TIM_Base_Start_IT(&htim3);
+}
+
+void SeekSyringeButt(float target_sps) {
+	float current_sps = 400.0f; // Start slow for high torque
+	lead_mode = MOVE_SEEK_BUTT;
+
+	// Start at initial slow speed, Direction = 1 (Down)
+	StartLeadMotorTimer(current_sps, 1);
+
+	while (lead_is_moving) {
+		// Ramp up logic
+		if (current_sps < target_sps) {
+			current_sps += 100.0f; // Acceleration increment
+			uint32_t arr_val = (uint32_t) (1000000.0f / current_sps) - 1;
+			__HAL_TIM_SET_AUTORELOAD(&htim3, arr_val);
+		}
+
+		HAL_Delay(5); // Ramp smoothing delay
+
+		// Interrupt logic handles lead_is_moving = 0 upon sensor hit
+		if (!lead_is_moving)
+			break;
+	}
+}
+
+void RetractToTop_old(float steps_per_second) {
+	lead_mode = MOVE_SEEK_TOP;
+	StartLeadMotorTimer(steps_per_second, 0); // 0 = CCW (Up)
+	while (lead_is_moving)
+		;
+	HAL_GPIO_WritePin(EN_LEAD_PORT, EN_LEAD_PIN, GPIO_PIN_SET);
+}
+
+void RetractToTop(float target_sps) {
+	float current_sps = 400.0f;
+	lead_mode = MOVE_SEEK_TOP;
+
+	// Start at initial slow speed, Direction = 0 (Up)
+	StartLeadMotorTimer(current_sps, 0);
+
+	while (lead_is_moving) {
+		// Ramp up logic
+		if (current_sps < target_sps) {
+			current_sps += 100.0f;
+			uint32_t arr_val = (uint32_t) (1000000.0f / current_sps) - 1;
+			__HAL_TIM_SET_AUTORELOAD(&htim3, arr_val);
+		}
+
+		HAL_Delay(5);
+
+		if (!lead_is_moving)
+			break;
+	}
+}
+
+void DriveStepper(int steps, float steps_per_second, uint8_t direction) {
+	lead_steps_remaining = steps;
+	lead_mode = MOVE_EXACT_STEPS;
+	StartLeadMotorTimer(steps_per_second, direction);
+	while (lead_is_moving)
+		; // Blocking wait for finish or limit
+}
+
+void DriveStepperRamped(int total_steps, float target_sps, uint8_t direction) {
+	float current_sps = 20.0f; // Start slow for higher torque
+
+	// Safety check: prevent division by zero or negative targets
+	if (target_sps < current_sps)
+		target_sps = current_sps;
+
+	lead_mode = MOVE_EXACT_STEPS;
+	lead_steps_remaining = total_steps;
+	lead_is_moving = 1;
+
+	// Start the timer at the initial slow speed
+	StartLeadMotorTimer(current_sps, direction);
+
+	while (lead_is_moving) {
+		// --- 1. RAMPING LOGIC ---
+		// Increase speed until we hit target_sps
+		if (current_sps < target_sps) {
+			current_sps += 15.0f;
+
+			// Limit current_sps so it doesn't overshoot the target
+			if (current_sps > target_sps)
+				current_sps = target_sps;
+
+			// Update the Timer Auto-Reload Register (ARR)
+			// Assumes 1MHz Timer clock (1000000 / sps)
+			uint32_t arr_val = (uint32_t) (1000000.0f / current_sps) - 1;
+			__HAL_TIM_SET_AUTORELOAD(&htim3, arr_val);
+		}
+
+		// The ISR handles lead_steps_remaining; we exit when the move is done
+		if (lead_steps_remaining <= 0) {
+			lead_is_moving = 0;
+			break;
+		}
+	}
+
+	// Final safety: ensure timer is stopped
+	HAL_TIM_Base_Stop_IT(&htim3);
+}
+
+//Start timer for tray
+void StartTrayMotorTimer(float rps) {
+	HAL_TIM_Base_Stop_IT(&htim3);
+
+	// 1/4 Step Math: 3200 steps per rev
+	float steps_per_second = rps * steps_per_rev_lead;
+	uint32_t arr_val = (uint32_t) (1000000.0f / steps_per_second) - 1;
+
+	__HAL_TIM_SET_AUTORELOAD(&htim3, arr_val);
+	__HAL_TIM_SET_COUNTER(&htim3, 0);
+	HAL_GPIO_WritePin(EN_TRAY_PORT, EN_TRAY_PIN, GPIO_PIN_RESET); // Enable Tray
+	tray_is_moving = 1;
+	HAL_TIM_Base_Start_IT(&htim3);
+}
+
+void RotateTray45_Timer2(float rps) {
+	tray_steps_remaining = 100; // Updated for 1/4 step
+	tray_homing = 0;
+	StartTrayMotorTimer(rps);
+	while (tray_is_moving)
+		;
+	//HAL_GPIO_WritePin(EN_TRAY_PORT, EN_TRAY_PIN, GPIO_PIN_SET);
+}
+
+/**
+ * @brief Rotates the Tray 45 degrees (100 steps @ 1/4 step)
+ * with Acceleration and Deceleration.
+ */
+void RotateTray45_Timer(float min_rps, float max_rps) {
+	int total_steps = 100;     // 45 degrees at 1/4 step
+	int accel_steps = 30;      // Steps to reach max speed
+	int decel_start = 70; // Step count at which to start slowing down (100 - 30)
+	float current_rps = min_rps;
+
+	tray_steps_remaining = total_steps;
+	tray_homing = 0;
+	tray_is_moving = 1;
+
+	// Start Timer at minimum speed
+	StartTrayMotorTimer(current_rps);
+
+	while (tray_is_moving) {
+		int steps_taken = total_steps - tray_steps_remaining;
+
+		// --- ACCELERATION PHASE ---
+		if (steps_taken < accel_steps && current_rps < max_rps) {
+			current_rps += 0.005f; // Small speed increment
+		}
+		// --- DECELERATION PHASE ---
+		else if (steps_taken > decel_start && current_rps > min_rps) {
+			current_rps -= 0.005f; // Small speed decrement
+		}
+		// --- CRUISE PHASE ---
+		// (Just maintains max_rps)
+
+		// Update Timer Frequency (ARR)
+		// sps = rps * 800 (for 1/4 stepping)
+		float sps = current_rps * 800.0f;
+		uint32_t arr_val = (uint32_t) (1000000.0f / sps) - 1;
+		__HAL_TIM_SET_AUTORELOAD(&htim3, arr_val);
+
+		HAL_Delay(10); // Ramp smoothing delay
+
+		if (tray_steps_remaining <= 0)
+			break;
+	}
+
+	// Wait for the interrupt to finish the very last step
+	while (tray_is_moving)
+		;
+
+	// Optional: Keep enabled for holding torque, or disable to save heat
+	// HAL_GPIO_WritePin(EN_TRAY_PORT, EN_TRAY_PIN, GPIO_PIN_SET);
+}
+
+void RotateTray45_Trapezoidal(float min_rps, float max_rps) {
+	int total_steps = 400;  // 3200 / 8
+	int accel_steps = 100;
+	int decel_start = 300;
+	float current_rps = min_rps;
+
+	tray_steps_remaining = total_steps;
+	tray_homing = 0;
+	StartTrayMotorTimer(current_rps);
+
+	while (tray_is_moving) {
+		int steps_taken = total_steps - tray_steps_remaining;
+		if (steps_taken < accel_steps && current_rps < max_rps)
+			current_rps += 0.002f;
+		else if (steps_taken > decel_start && current_rps > min_rps)
+			current_rps -= 0.002f;
+
+		uint32_t arr_val = (uint32_t) (1000000.0f
+				/ (current_rps * steps_per_rev_lead)) - 1;
+		__HAL_TIM_SET_AUTORELOAD(&htim3, arr_val);
+		HAL_Delay(5);
+		if (tray_steps_remaining <= 0)
+			break;
+	}
+}
+
+/**
+ * @brief Homes the tray using 1/4 step math
+ */
+void HomeTray_Timer(float rps) {
+	tray_steps_remaining = 1600; // Safety timeout (2 full rotations @ 1/4 step)
+	tray_homing = 1;
+	StartTrayMotorTimer(rps);
+	while (tray_is_moving)
+		;
+	while (tray_is_moving)
+		;
+	HAL_GPIO_WritePin(EN_TRAY_PORT, EN_TRAY_PIN, GPIO_PIN_SET);
+
+}
+
+void HomeTray_Ramped(float target_rps) {
+	float current_rps = 0.02f;
+	tray_steps_remaining = 8000;   // Safety timeout
+	tray_homing = 1;               // Enable sensor check in interrupt
+	tray_clear = 0;
+	tray_is_moving = 1;
+
+	// PHASE 1: Fast Search (with ramp up)
+	StartTrayMotorTimer(current_rps);
+	while (tray_is_moving) {
+		if (current_rps < target_rps) {
+			current_rps += 0.0025f;
+			uint32_t arr_val = (uint32_t) (1000000.0f
+					/ (current_rps * steps_per_rev_lead)) - 1;
+			__HAL_TIM_SET_AUTORELOAD(&htim3, arr_val);
+		}
+		HAL_Delay(5);
+	}
+
+	// PHASE 2: Smooth Deceleration (The 200-step "Park")
+	// The interrupt has stopped the motor. We now move 200 more steps manually.
+	int decel_steps = 400;
+	float start_decel_rps = current_rps;
+	float min_rps = 0.04f;
+
+	tray_steps_remaining = decel_steps;
+	tray_homing = 0; // Disable sensor check so we don't trigger again
+
+	StartTrayMotorTimer(start_decel_rps);
+
+	while (tray_is_moving) {
+		// Ramp down based on steps remaining
+		if (current_rps > min_rps) {
+			// Linear reduction: reduce speed as tray_steps_remaining goes to 0
+			current_rps -= (start_decel_rps - min_rps) / decel_steps;
+			if (current_rps < min_rps)
+				current_rps = min_rps;
+
+			uint32_t arr_val = (uint32_t) (1000000.0f
+					/ (current_rps * steps_per_rev_lead)) - 1;
+			__HAL_TIM_SET_AUTORELOAD(&htim3, arr_val);
+		}
+		HAL_Delay(2); // Faster update for smoother decel
+		if (tray_steps_remaining <= 0)
+			break;
+	}
+}
+
+/*--------------------------------------------------INTERRUPT FUNCTIONS-------------------------------------------*/
+
+// Returns 1 if we should ABORT the synthesis, 0 if we should continue
+int Check_Pause_During_Move(void) {
+	uint16_t tx, ty;
+
+	// Check if Touch IRQ is triggered (Low)
+	if (HAL_GPIO_ReadPin(GPIOB, GPIO_PIN_1) == GPIO_PIN_RESET) {
+		Touch_GetXY(&tx, &ty);
+
+		// Is the touch inside the PAUSE button area?
+		if (tx >= 110 && tx <= 210 && ty >= 200 && ty <= 230) {
+
+			// --- 1. STOP HARDWARE ---
+			HAL_TIM_Base_Stop_IT(&htim3); // Stop steps immediately
+			HAL_GPIO_WritePin(GPIOC, GPIO_PIN_5, GPIO_PIN_SET); // Disable Lead Driver (Save heat)
+
+			// --- 2. DRAW UI OVERLAY ---
+			TFT_FillRect_Fast(50, 75, 220, 90, ILI9341_COLOR_BLACK);
+			TFT_DrawRect(50, 75, 220, 90, ILI9341_COLOR_HALO);
+			TFT_DrawString(85, 90, "SYSTEM PAUSED", ILI9341_COLOR_WHITE, 1);
+
+			TFT_DrawRect(70, 125, 80, 30, 0x07E0); // Resume (Green)
+			TFT_DrawString(85, 135, "RESUME", 0x07E0, 1);
+			TFT_DrawRect(170, 125, 80, 30, 0xF800); // Exit (Red)
+			TFT_DrawString(195, 135, "EXIT", 0xF800, 1);
+
+			// --- 3. WAIT FOR INPUT ---
+			while (1) {
+				if (HAL_GPIO_ReadPin(GPIOB, GPIO_PIN_1) == GPIO_PIN_RESET) {
+					Touch_GetXY(&tx, &ty);
+
+					// RESUME Pressed
+					if (tx >= 70 && tx <= 150 && ty >= 125 && ty <= 155) {
+						Draw_Running_Screen_Static(); // Clear the overlay
+						HAL_GPIO_WritePin(GPIOC, GPIO_PIN_5, GPIO_PIN_RESET); // Re-enable Lead
+						HAL_TIM_Base_Start_IT(&htim3); // Restart steps
+						return 0;
+					}
+
+					// EXIT Pressed
+					if (tx >= 170 && tx <= 250 && ty >= 125 && ty <= 155) {
+						currentState = MENU_MAIN;
+						return 1; // Signal to kill the loop
+					}
+				}
+			}
+		}
+	}
+	return 0;
+}
+
+void Save_Recipe_To_Flash(int slot, Recipe *r) {
+	uint32_t address = 0x080E0000 + (slot * sizeof(Recipe)); // Example Flash Address
+
+	HAL_FLASH_Unlock();
+	// 1. Erase the sector first (Crucial!)
+	FLASH_Erase_Sector(FLASH_SECTOR_1, VOLTAGE_RANGE_3);
+
+	// 2. Write the struct byte-by-byte or word-by-word
+	uint32_t *dataPtr = (uint32_t*) r;
+	for (int i = 0; i < (sizeof(Recipe) / 4); i++) {
+		HAL_FLASH_Program(FLASH_TYPEPROGRAM_WORD, address + (i * 4),
+				dataPtr[i]);
+	}
+	HAL_FLASH_Lock();
+}
+
+/* FLASH DEFINITIONS FOR F401RE */
+#define FLASH_STORAGE_ADDRESS 0x08040000 // Start of Sector 6
+#define FLASH_SECTOR_NUM      FLASH_SECTOR_6
+
+void SaveRecipesToFlash(void) {
+	HAL_FLASH_Unlock();
+
+	// 1. Erase Sector 6
+	FLASH_EraseInitTypeDef EraseInitStruct;
+	uint32_t SectorError;
+	EraseInitStruct.TypeErase = FLASH_TYPEERASE_SECTORS;
+	EraseInitStruct.VoltageRange = FLASH_VOLTAGE_RANGE_3; // 2.7V to 3.6V
+	EraseInitStruct.Sector = FLASH_SECTOR_NUM;
+	EraseInitStruct.NbSectors = 1;
+
+	if (HAL_FLASHEx_Erase(&EraseInitStruct, &SectorError) != HAL_OK) {
+		HAL_FLASH_Lock();
+		return; // Handle error: maybe show a "Save Failed" message on LCD
+	}
+
+	// 2. Write the recipeDatabase array
+	uint32_t *dataPtr = (uint32_t*) &recipeDatabase;
+	uint32_t address = FLASH_STORAGE_ADDRESS;
+	int wordsToWrite = sizeof(recipeDatabase) / 4;
+
+	for (int i = 0; i < wordsToWrite; i++) {
+		if (HAL_FLASH_Program(FLASH_TYPEPROGRAM_WORD, address, dataPtr[i])
+				== HAL_OK) {
+			address += 4;
+		}
+	}
+
+	// 3. Save the saved_recipe_count immediately after the array
+	HAL_FLASH_Program(FLASH_TYPEPROGRAM_WORD, address,
+			(uint32_t) saved_recipe_count);
+
+	HAL_FLASH_Lock();
+}
+
+void LoadRecipesFromFlash(void) {
+	uint32_t address = FLASH_STORAGE_ADDRESS;
+
+	// Check if flash is empty (fresh chip/erased flash is all 1s)
+	if (*(__IO uint32_t*) address == 0xFFFFFFFF) {
+		saved_recipe_count = 0;
+		return;
+	}
+
+	// Copy flash data into RAM
+	memcpy(&recipeDatabase, (void*) address, sizeof(recipeDatabase));
+
+	// Load the count from the address immediately following the database
+	saved_recipe_count = (int) (*(__IO uint32_t*) (address
+			+ sizeof(recipeDatabase)));
+
+	// Safety: Cap the count to prevent array index issues
+	if (saved_recipe_count > 5)
+		saved_recipe_count = 5;
+}
+
+/*--------------------------------------------------SCREEN FUNCTIONS-------------------------------------------*/
+void Reset_All_Values() {
+	for (int i = 0; i < 8; i++) {
+		syringe_diams[i] = 0.0;
+		volume_mls[i] = 0.0;
+		flow_rates[i] = 0;
+		time_breaks[i] = 0;
+	}
+	current_fluid_idx = 0;
+}
+
+void TFT_WriteCmd(uint8_t cmd) {
+	HAL_GPIO_WritePin(TFT_DC_GPIO_Port, TFT_DC_Pin, GPIO_PIN_RESET);
+	HAL_GPIO_WritePin(TFT_CS_GPIO_Port, TFT_CS_Pin, GPIO_PIN_RESET);
+	HAL_SPI_Transmit(&hspi1, &cmd, 1, 10);
+	HAL_GPIO_WritePin(TFT_CS_GPIO_Port, TFT_CS_Pin, GPIO_PIN_SET);
+}
+
+void TFT_WriteData(uint8_t data) {
+	HAL_GPIO_WritePin(TFT_DC_GPIO_Port, TFT_DC_Pin, GPIO_PIN_SET);
+	HAL_GPIO_WritePin(TFT_CS_GPIO_Port, TFT_CS_Pin, GPIO_PIN_RESET);
+	HAL_SPI_Transmit(&hspi1, &data, 1, 10);
+	HAL_GPIO_WritePin(TFT_CS_GPIO_Port, TFT_CS_Pin, GPIO_PIN_SET);
+}
+
+void TFT_SetAddressWindow(uint16_t x0, uint16_t y0, uint16_t x1, uint16_t y1) {
+	TFT_WriteCmd(0x2A); // Column Address Set
+	TFT_WriteData(x0 >> 8);
+	TFT_WriteData(x0 & 0xFF);
+	TFT_WriteData(x1 >> 8);
+	TFT_WriteData(x1 & 0xFF);
+	TFT_WriteCmd(0x2B); // Row Address Set
+	TFT_WriteData(y0 >> 8);
+	TFT_WriteData(y0 & 0xFF);
+	TFT_WriteData(y1 >> 8);
+	TFT_WriteData(y1 & 0xFF);
+	TFT_WriteCmd(0x2C); // Memory Write
+}
+
+void Draw_Load_Recipe_Menu(void) {
+	TFT_FillScreen(ILI9341_COLOR_BLACK);
+	TFT_DrawString(10, 10, "LOAD RECIPE", ILI9341_COLOR_HALO, 2);
+
+	for (int i = 0; i < saved_recipe_count; i++) {
+		uint16_t y_pos = 50 + (i * 38); // Spaced out for fingers
+
+		// Main Selection Box (The Recipe Name)
+		TFT_FillRect_Fast(10, y_pos, 230, 32, 0x2104);
+		TFT_DrawString(20, y_pos + 8, recipeDatabase[i].name,
+		ILI9341_COLOR_WHITE, 1);
+
+		// THE DELETE CROSS (Red X)
+		TFT_FillRect_Fast(250, y_pos, 50, 32, 0xF800); // Red
+		TFT_DrawString(268, y_pos + 8, "X", ILI9341_COLOR_WHITE, 2);
+	}
+
+	// BACK Button at bottom
+	TFT_FillRect_Fast(10, 210, 80, 25, 0x8000);
+	TFT_DrawString(25, 218, "BACK", ILI9341_COLOR_WHITE, 1);
+}
+
+void Load_Recipe_To_System(int index) {
+	Recipe *r = &recipeDatabase[index];
+	current_fluid_idx = 0;
+
+	for (int i = 0; i < 8; i++) {
+		// Values
+		syringe_diams[i] = r->syringe_diams[i];
+		volume_mls[i] = r->volume_mls[i];
+		flow_rates[i] = r->flow_rates[i];
+		time_breaks[i] = r->time_breaks[i];
+
+		// Units
+		diam_unit_indices[i] = r->diam_unit_indices[i];
+		vol_unit_indices[i] = r->vol_unit_indices[i];
+		flow_time_indices[i] = r->flow_time_indices[i];
+		time_unit_indices[i] = r->time_unit_indices[i];
+	}
+}
+
+void TFT_DrawPixel(uint16_t x, uint16_t y, uint16_t color) {
+	TFT_SetAddressWindow(x, y, x, y);
+	TFT_WriteData(color >> 8);
+	TFT_WriteData(color & 0xFF);
+}
+
+void TFT_FillScreen(uint16_t color) {
+	// Set the window to the full Landscape boundaries
+	// X goes from 0 to 319, Y goes from 0 to 239
+	TFT_SetAddressWindow(0, 0, 319, 239);
+
+	// Total pixels = 320 * 240 = 76800
+	for (uint32_t i = 0; i < 76800; i++) {
+		TFT_WriteData(color >> 8);
+		TFT_WriteData(color & 0xFF);
+	}
+}
+
+// Support float to string 4 decimal places
+void ftoa(float n, char *res, int afterpoint) {
+	int ipart = (int) n;
+	float fpart = n - (float) ipart;
+
+	// Handle negative numbers if necessary
+	if (n < 0) {
+		*res++ = '-';
+		ipart = -ipart;
+		fpart = -fpart;
+	}
+
+	// Convert integer part
+	itoa(ipart, res, 10);
+	int len = strlen(res);
+
+	if (afterpoint > 0) {
+		res[len] = '.';
+
+		// Multiply by 10^afterpoint (e.g., 10000 for 4 places)
+		float multiplier = pow(10, afterpoint);
+		int fpart_int = (int) (fpart * multiplier + 0.5f); // +0.5 for rounding
+
+		// Convert fractional part and pad with leading zeros
+		char f_str[10];
+		itoa(fpart_int, f_str, 10);
+
+		int f_len = strlen(f_str);
+		int i;
+		// Add leading zeros if needed (e.g., .0005)
+		for (i = 0; i < (afterpoint - f_len); i++) {
+			res[len + 1 + i] = '0';
+		}
+		strcpy(res + len + 1 + i, f_str);
+	}
+}
+
+// Helper to convert int to string (for Flow Rate/Time)
+void itoa_simple(int n, char *res) {
+	itoa(n, res, 10);
+}
+
+// Draw a single character scaled up
+void TFT_DrawString(uint16_t x, uint16_t y, char *str, uint16_t color,
+		int scale) {
+	while (*str) {
+		TFT_DrawChar(x, y, *str, color, scale);
+		x += (6 * scale); // 5 pixels for char + 1 pixel for spacing
+		str++;
+	}
+}
+
+#define ILI9341_COLOR_BLUE 0x001F
+
+void TFT_FillRect(uint16_t x, uint16_t y, uint16_t w, uint16_t h,
+		uint16_t color) {
+	for (uint16_t i = 0; i < h; i++) {
+		for (uint16_t j = 0; j < w; j++) {
+			// Replace 'TFT_DrawPixel' with your specific pixel function name
+			TFT_DrawPixel(x + j, y + i, color);
+		}
+	}
+}
+
+//Instant fill
+void TFT_FillRect_Fast(uint16_t x, uint16_t y, uint16_t w, uint16_t h,
+		uint16_t color) {
+	if (x >= 320 || y >= 240)
+		return;
+	if ((x + w) > 320)
+		w = 320 - x;
+	if ((y + h) > 240)
+		h = 240 - y;
+
+	TFT_SetAddressWindow(x, y, x + w - 1, y + h - 1); // Set the block area once [cite: 70-72]
+
+	uint8_t color_high = color >> 8;
+	uint8_t color_low = color & 0xFF;
+
+	HAL_GPIO_WritePin(TFT_DC_GPIO_Port, TFT_DC_Pin, GPIO_PIN_SET);
+	HAL_GPIO_WritePin(TFT_CS_GPIO_Port, TFT_CS_Pin, GPIO_PIN_RESET);
+
+	// Write all pixels in one continuous stream
+	for (uint32_t i = 0; i < (uint32_t) w * h; i++) {
+		HAL_SPI_Transmit(&hspi1, &color_high, 1, 10);
+		HAL_SPI_Transmit(&hspi1, &color_low, 1, 10);
+	}
+	HAL_GPIO_WritePin(TFT_CS_GPIO_Port, TFT_CS_Pin, GPIO_PIN_SET);
+}
+
+void TFT_DrawDABAM(uint16_t x, uint16_t y, uint16_t color, int scale) {
+	TFT_DrawChar(x, y, font_chars['D' - 'A'], color, scale);
+	TFT_DrawChar(x + (7 * scale), y, font_chars['A' - 'A'], color, scale);
+	TFT_DrawChar(x + (14 * scale), y, font_chars['B' - 'A'], color, scale);
+	TFT_DrawChar(x + (21 * scale), y, font_chars['A' - 'A'], color, scale);
+	TFT_DrawChar(x + (28 * scale), y, font_chars['M' - 'A'], color, scale);
+}
+
+//Home screen buttons
+void TFT_DrawRect(uint16_t x, uint16_t y, uint16_t w, uint16_t h,
+		uint16_t color) {
+	TFT_SetAddressWindow(x, y, x + w - 1, y + h - 1);
+	for (uint32_t i = 0; i < w * h; i++) {
+		TFT_WriteData(color >> 8);
+		TFT_WriteData(color & 0xFF);
+	}
+}
+
+void TFT_DrawButton(uint16_t x, uint16_t y, uint16_t w, uint16_t h, char *label,
+		uint16_t color) {
+	// Draw Button Shadow
+	TFT_DrawRect(x + 4, y + 4, w, h, ILI9341_COLOR_BLACK);
+	// Draw Main Button Body
+	TFT_DrawRect(x, y, w, h, color);
+	// Draw Border
+	TFT_DrawRect(x, y, w, 2, ILI9341_COLOR_WHITE);           // Top
+	TFT_DrawRect(x, y + h - 2, w, 2, ILI9341_COLOR_DARKGRAY); // Bottom
+}
+
+uint16_t Touch_ReadRaw(uint8_t cmd) {
+	uint8_t tx_data[3] = { cmd, 0x00, 0x00 };
+	uint8_t rx_data[3];
+
+	HAL_GPIO_WritePin(GPIOB, TOUCH_CS_Pin, GPIO_PIN_RESET);
+	HAL_SPI_TransmitReceive(&hspi1, tx_data, rx_data, 3, 10);
+	HAL_GPIO_WritePin(GPIOB, TOUCH_CS_Pin, GPIO_PIN_SET);
+
+	return ((rx_data[1] << 8) | rx_data[2]) >> 3;
+}
+
+void Draw_Confirm_Popup(void) {
+	//Background
+	TFT_DrawRect(40, 60, 240, 120, ILI9341_COLOR_GRAY);
+
+	// Message
+	TFT_DrawString(50, 85, "Run Synthesis Now?", ILI9341_COLOR_WHITE, 2);
+
+	//Yes Button (Green)
+	TFT_FillRect_Fast(60, 120, 80, 40, 0x07E0);
+	TFT_DrawString(80, 132, "YES", ILI9341_COLOR_BLACK, 2);
+
+	//No Button (Red)
+	TFT_FillRect_Fast(180, 120, 80, 40, 0xF800);
+	TFT_DrawString(206, 132, "NO", ILI9341_COLOR_WHITE, 2);
+}
+
+// Returns 1 if the synthesis should be aborted entirely, 0 to continue
+int Handle_Pause_Condition(void) {
+	uint16_t tx, ty;
+
+	// 1. Check if the screen is touched
+	if (HAL_GPIO_ReadPin(GPIOB, GPIO_PIN_1) == GPIO_PIN_RESET) {
+		Touch_GetXY(&tx, &ty);
+
+		// 2. Check if touch is within PAUSE button (X: 110-210, Y: 200-230)
+		if (tx >= 110 && tx <= 210 && ty >= 200 && ty <= 230) {
+			currentState = MENU_PAUSED;
+
+			// Draw Pause Overlay
+			TFT_FillRect_Fast(60, 80, 200, 100, ILI9341_COLOR_BLACK);
+			TFT_DrawRect(60, 80, 200, 100, ILI9341_COLOR_HALO);
+			TFT_DrawString(110, 100, "SYSTEM PAUSED", ILI9341_COLOR_WHITE, 1);
+
+			// Draw Resume and Stop buttons inside the overlay
+			TFT_DrawRect(80, 130, 70, 30, 0x07E0); // Green Resume
+			TFT_DrawString(90, 140, "RESUME", 0x07E0, 1);
+
+			TFT_DrawRect(170, 130, 70, 30, 0xF800); // Red Stop
+			TFT_DrawString(190, 140, "STOP", 0xF800, 1);
+
+			// 3. Hang here until user makes a choice
+			while (currentState == MENU_PAUSED) {
+				if (HAL_GPIO_ReadPin(GPIOB, GPIO_PIN_1) == GPIO_PIN_RESET) {
+					Touch_GetXY(&tx, &ty);
+
+					// Resume pressed
+					if (tx >= 80 && tx <= 150 && ty >= 130 && ty <= 160) {
+						currentState = MENU_RUNNING;
+						// Redraw the original Running Screen to clean up the overlay
+						Draw_Running_Screen_Static();
+						return 0;
+					}
+
+					// Stop pressed
+					if (tx >= 170 && tx <= 240 && ty >= 130 && ty <= 160) {
+						currentState = MENU_MAIN;
+						return 1; // Signal to abort the loop
+					}
+				}
+			}
+		}
+	}
+	return 0; // No pause requested
+}
+
+void Touch_GetXY(uint16_t *x, uint16_t *y) {
+	uint16_t rawX = Touch_ReadRaw(0xD0);
+	uint16_t rawY = Touch_ReadRaw(0x90);
+
+	// Physical sensor limits from your debug data
+	int32_t RAW_MIN_X = 236;
+	int32_t RAW_MAX_X = 3830;
+	int32_t RAW_MIN_Y = 376;
+	int32_t RAW_MAX_Y = 3934;
+
+	// Based on your data:
+	// Left side (0) is RawY ~3934, Right side (319) is RawY ~376
+	int32_t calX = 319
+			- (((int32_t) rawY - RAW_MIN_Y) * 319 / (RAW_MAX_Y - RAW_MIN_Y));
+
+	// Top side (0) is RawX ~3830, Bottom side (239) is RawX ~236
+	int32_t calY = 239
+			- (((int32_t) rawX - RAW_MIN_X) * 239 / (RAW_MAX_X - RAW_MIN_X));
+
+	// Hard Clamping to prevent logic errors
+	if (calX < 0)
+		calX = 0;
+	if (calX > 319)
+		calX = 319;
+	if (calY < 0)
+		calY = 0;
+	if (calY > 239)
+		calY = 239;
+
+	*x = (uint16_t) calX;
+	*y = (uint16_t) calY;
+}
+
+// Character and Num definations
+void TFT_DrawChar(uint16_t x, uint16_t y, char c, uint16_t color, int scale) {
+	const uint8_t *bitmap;
+
+	// Mapping logic
+	if (c >= 'A' && c <= 'Z') {
+		bitmap = font_chars[c - 'A'];
+	} else if (c >= 'a' && c <= 'z') {
+		bitmap = font_chars_low[c - 'a'];
+	} else if (c >= '0' && c <= '9') {
+		bitmap = font_nums[c - '0'];
+	} else if (c == '.') {
+		bitmap = font_nums[10]; // Using your array index instead of static
+	} else if (c == '-') {
+		bitmap = font_nums[11]; // Hyphen/Minus
+	} else if (c == '<' || c == '>') {
+		bitmap = font_nums[12]; // Backspace Arrow
+	} else if (c == '?') {
+		bitmap = font_nums[13]; // Question
+	} else if (c == ' ') {
+		return;
+	} else {
+		return;
+	}
+
+	// Drawing logic (Pixel-doubling / Scaling)
+	for (int i = 0; i < 5; i++) {
+		for (int j = 0; j < 8; j++) {
+			if (bitmap[i] & (1 << j)) {
+				TFT_FillRect(x + (i * scale), y + (j * scale), scale, scale,
+						color);
+			}
+		}
+	}
+}
+
+void Draw_Numpad() {
+	TFT_FillScreen(ILI9341_COLOR_BLACK);
+
+	char *keys[] =
+			{ "1", "2", "3", "4", "5", "6", "7", "8", "9", ".", "0", "<-" };
+
+	// 1. Display Header
+	TFT_DrawRect(10, 5, 300, 35, ILI9341_COLOR_DARKGRAY);
+	// Initial display of buffer
+	TFT_DrawString(20, 15, numpad_buffer, ILI9341_COLOR_WHITE, 2);
+
+	// 2. Grid Setup (Strictly 105px width per column, 40px height per row)
+	for (int i = 0; i < 12; i++) {
+		int col = i % 3;
+		int row = i / 3;
+
+		uint16_t bx = 10 + (col * 105);   // x: 10, 115, 220
+		uint16_t by = 50 + (row * 40);    // y: 50, 90, 130, 170
+
+		TFT_DrawRect(bx, by, 95, 35, ILI9341_COLOR_BLUE);
+		TFT_DrawString(bx + 40, by + 12, keys[i], ILI9341_COLOR_WHITE, 1);
+	}
+
+	// 3. The Enter Button
+	uint16_t enterY = 210;
+	TFT_DrawRect(10, enterY, 300, 25, 0x07E0); // Green
+	TFT_DrawString(130, enterY + 8, "ENTER", ILI9341_COLOR_WHITE, 1);
+}
+
+void Draw_Keyboard(void) {
+	TFT_FillRect_Fast(0, 0, 320, 240, 0x0841); // Midnight Blue
+
+	// Header & Input Box
+	TFT_DrawString(10, 10, "NAME YOUR RECIPE:", ILI9341_COLOR_HALO, 1);
+	TFT_FillRect_Fast(10, 30, 300, 40, ILI9341_COLOR_BLACK);
+	TFT_DrawRect(10, 34, 300, 40, ILI9341_COLOR_WHITE);
+
+	// The Keys (A-Z, Space, Backspace, Enter)
+	char *keys[] = { "Q", "W", "E", "R", "T", "Y", "U", "I", "O", "P", "A", "S",
+			"D", "F", "G", "H", "J", "K", "L", "<", "Z", "X", "C", "V", "B",
+			"N", "M", " ", "_", "OK" };
+
+	for (int i = 0; i < 30; i++) {
+		int col = i % 10;
+		int row = i / 10;
+		int x = 5 + (col * 31);
+		int y = 85 + (row * 45);
+
+		TFT_DrawRect(x, y, 28, 40, ILI9341_COLOR_HALO);
+		TFT_DrawString(x + 8, y + 15, keys[i], ILI9341_COLOR_BLACK, 1);
+	}
+}
+
+void Draw_Stepper(uint16_t x, uint16_t y, char *label, float value, char *unit,
+		int isFloat, char *limits) {
+	char val_str[20]; // Larger buffer for 4 decimals
+
+	if (isFloat) {
+		// Use the updated ftoa with 4 point precision
+		ftoa(value, val_str, 4);
+	} else {
+		itoa((int) value, val_str, 10);
+	}
+
+	// Label
+	TFT_DrawString(x, y, label, ILI9341_COLOR_WHITE, 2);
+
+	// Value Box - Widen this to 100 pixels to fit "0.0000"
+	TFT_FillRect(x + 110, y - 2, 100, 22, ILI9341_COLOR_DARKGRAY);
+	TFT_DrawString(x + 115, y + 2, val_str, ILI9341_COLOR_WHITE, 2);
+
+	// Unit
+	TFT_DrawString(x + 215, y + 5, unit, ILI9341_COLOR_WHITE, 1);
+}
+
+//Seamless volume progress for run screen
+void Update_Volume_Only(float volume_done) {
+	TFT_FillRect(170, 95, 120, 30, COLOR_CARD); // Erase old number only
+	char vol_buf[16];
+	sprintf(vol_buf, "%.3f", volume_done);
+	TFT_DrawString(170, 95, vol_buf, ILI9341_COLOR_WHITE, 3);
+}
+
+void Update_Fluid_Selection(int selected_index) {
+	// 1. Redraw Fluid Selection Buttons (1-8)
+	for (int i = 0; i < 8; i++) {
+		uint16_t bx = 95 + (i * 28);
+		uint16_t color = (i == selected_index) ? 0x07E0 : ILI9341_COLOR_BLUE;
+		TFT_DrawButton(bx, 28, 24, 22, "", color);
+		char num_str[2] = { (char) ('1' + i), '\0' };
+		TFT_DrawString(bx + 7, 32, num_str, ILI9341_COLOR_WHITE, 1);
+	}
+
+	// New Layout Constants
+	uint16_t box_x = 90;     // Box starts at 90
+	uint16_t box_w = 100;    // Box width 100
+	uint16_t clear_w = 120;  // Clearing width 120
+	uint16_t text_x = 95; // Text starts at 135 (45 pixels offset from box start)
+
+	// 2. ERASE OLD VALUES
+	TFT_FillRect_Fast(box_x, 68, clear_w, 25, ILI9341_COLOR_BLACK);
+	TFT_FillRect_Fast(box_x, 108, clear_w, 25, ILI9341_COLOR_BLACK);
+	TFT_FillRect_Fast(box_x, 148, clear_w, 25, ILI9341_COLOR_BLACK);
+	TFT_FillRect_Fast(box_x, 188, clear_w, 25, ILI9341_COLOR_BLACK);
+
+	// 3. DRAW NEW VALUE BACKGROUNDS (Outline)
+	TFT_DrawRect(box_x, 68, box_w, 22, ILI9341_COLOR_DARKGRAY);
+	TFT_DrawRect(box_x, 108, box_w, 22, ILI9341_COLOR_DARKGRAY);
+	TFT_DrawRect(box_x, 148, box_w, 22, ILI9341_COLOR_DARKGRAY);
+	TFT_DrawRect(box_x, 188, box_w, 22, ILI9341_COLOR_DARKGRAY);
+
+	// 4. DRAW NEW VALUES with 4 decimal places
+	char buf[20]; // Larger buffer for extra precision
+
+	// Syringe Diameter
+	ftoa(syringe_diams[selected_index], buf, 4);
+	TFT_DrawString(text_x, 72, buf, ILI9341_COLOR_WHITE, 2);
+
+	// Volume
+	ftoa(volume_mls[selected_index], buf, 4);
+	TFT_DrawString(text_x, 112, buf, ILI9341_COLOR_WHITE, 2);
+
+	// Flow Rate
+	ftoa(flow_rates[selected_index], buf, 4);
+	TFT_DrawString(text_x, 152, buf, ILI9341_COLOR_WHITE, 2);
+
+	// Time Break
+	ftoa(time_breaks[selected_index], buf, 4);
+	TFT_DrawString(text_x, 192, buf, ILI9341_COLOR_WHITE, 2);
+
+	// --- NEW: REDRAW UNITS FOR THIS SPECIFIC FLUID ---
+	uint16_t unit_x = 210;
+	char f_buf[12];
+
+	Draw_Unit_Button(unit_x, 68, diam_units[diam_unit_indices[selected_index]]);
+	Draw_Unit_Button(unit_x, 108, vol_units[vol_unit_indices[selected_index]]);
+
+	// Generate Flow string: e.g., "mL/h" or "uL/s"
+	sprintf(f_buf, "%s/%c", vol_units[vol_unit_indices[selected_index]],
+			(flow_time_indices[selected_index] == 0 ? 's' : 'h'));
+	Draw_Unit_Button(unit_x, 148, f_buf);
+
+	Draw_Unit_Button(unit_x, 188,
+			time_units[time_unit_indices[selected_index]]);
+}
+
+void Draw_Running_Screen_Static() {
+	// 1. Deep Background Theme
+	TFT_FillRect_Fast(0, 0, 320, 240, 0x0841);
+
+	// 2. Header Bar
+	TFT_FillRect_Fast(0, 0, 320, 40, ILI9341_COLOR_BLACK);
+	TFT_DrawString(15, 12, "DABAM", ILI9341_COLOR_HALO, 2);
+	TFT_DrawString(200, 15, "LIVE STATUS", ILI9341_COLOR_WHITE, 1);
+	TFT_FillRect_Fast(0, 40, 320, 1, ILI9341_COLOR_HALO);
+
+	// 3. Central Status Card
+	TFT_FillRect_Fast(15, 55, 290, 115, 0x18C3);
+	TFT_DrawRect(15, 55, 290, 115, ILI9341_COLOR_GRAY);
+
+	// Static Labels (These never change)
+	TFT_DrawString(30, 70, "ACTIVE SYRINGE:", ILI9341_COLOR_WHITE, 1);
+	TFT_DrawString(30, 100, "VOLUME:", ILI9341_COLOR_WHITE, 1);
+	TFT_DrawString(160, 100, "FLOW RATE:", ILI9341_COLOR_WHITE, 1);
+	TFT_DrawString(30, 145, "PROCESS:", ILI9341_COLOR_WHITE, 1);
+	//TFT_DrawString(90, 145, "STAND CLEAR - MOTOR ACTIVE", 0xF800, 1);
+
+	// 4. Progress Bar Outline
+	TFT_DrawRect(15, 180, 290, 4, ILI9341_COLOR_BLACK);
+
+	// 5. Control Button
+	TFT_DrawRect(110, 200, 100, 30, COLOR_RED);
+	TFT_DrawString(115, 210, "ESTOP TO PAUSE", ILI9341_COLOR_WHITE, 1);
+}
+
+void Update_Running_Screen_Values(int syringe_num, float volume,
+		float flow_rate, int current_step, int vol_idx, int time_idx) {
+	char buf[32];
+	uint16_t card_bg = 0x7BEF;
+
+	// --- 1. Update Syringe Number ---
+	TFT_FillRect_Fast(160, 68, 60, 25, card_bg);
+	sprintf(buf, "#%d", syringe_num);
+	TFT_DrawString(160, 68, buf, ILI9341_COLOR_WHITE, 2);
+
+	// --- 2. Update Volume with Units ---
+	TFT_FillRect_Fast(30, 115, 100, 20, card_bg);
+	snprintf(buf, 15, "%.2f %s", volume, vol_units[vol_idx]);
+	TFT_DrawString(30, 115, buf, ILI9341_COLOR_WHITE, 2);
+
+	// --- 3. Update Flow Rate with Units ---
+	TFT_FillRect_Fast(160, 115, 130, 20, card_bg);
+	char time_char = (flow_time_indices[current_step - 1] == 0) ? 's' : 'h';
+	snprintf(buf, 20, "%.1f %s/%c", flow_rate, vol_units[vol_idx], time_char);
+	TFT_DrawString(160, 115, buf, ILI9341_COLOR_WHITE, 2);
+
+	// --- 4. Update Progress Bar & Percentage ---
+	//int percent = (current_step * 100) / 8;
+
+	// Clear and draw the percentage text above the bar
+	//TFT_FillRect_Fast(130, 165, 60, 12, 0x0841); // Clear background color
+	//sprintf(buf, "%d%%", percent);
+	//TFT_DrawString(140, 165, buf, ILI9341_COLOR_HALO, 1);
+
+	// Update the actual bar
+	int progress_width = (290 * current_step) / 8;
+	TFT_FillRect_Fast(15, 180, progress_width, 4, ILI9341_COLOR_HALO);
+}
+
+void Draw_New_Synthesis_Menu(void) {
+	TFT_FillScreen(ILI9341_COLOR_BLACK);
+	TFT_DrawString(10, 5, "NEW SYNTHESIS", ILI9341_COLOR_HALO, 1);
+	TFT_DrawString(10, 30, "FLUID:", ILI9341_COLOR_WHITE, 2);
+	Update_Fluid_Selection(current_fluid_idx);
+
+	uint16_t unit_x = 210;
+	char buf[12]; // Buffer for 10 chars + null terminator
+
+	// --- ROW 1: DIAMETER ---
+	TFT_DrawString(10, 70, "DIAM:", ILI9341_COLOR_WHITE, 2);
+	TFT_FillRect_Fast(90, 65, 110, 25, 0x4208); // Grey Box
+	snprintf(buf, 11, "%.3f", syringe_diams[current_fluid_idx]);
+	TFT_DrawString(95, 70, buf, ILI9341_COLOR_WHITE, 2);
+	Draw_Unit_Button(unit_x, 68,
+			diam_units[diam_unit_indices[current_fluid_idx]]);
+
+	// --- ROW 2: VOLUME ---
+	TFT_DrawString(10, 110, "VOL :", ILI9341_COLOR_WHITE, 2);
+	TFT_FillRect_Fast(90, 105, 110, 25, 0x4208); // Grey Box
+	// Clipping to 10 chars ensures we don't hit the unit button
+	snprintf(buf, 11, "%.4f", volume_mls[current_fluid_idx]);
+	TFT_DrawString(95, 110, buf, ILI9341_COLOR_WHITE, 2);
+	Draw_Unit_Button(unit_x, 108,
+			vol_units[vol_unit_indices[current_fluid_idx]]);
+
+	// --- ROW 3: FLOW RATE ---
+	TFT_DrawString(10, 150, "FLOW:", ILI9341_COLOR_WHITE, 2);
+	TFT_FillRect_Fast(90, 145, 110, 25, 0x4208); // Grey Box
+	snprintf(buf, 11, "%.2f", flow_rates[current_fluid_idx]);
+	TFT_DrawString(95, 150, buf, ILI9341_COLOR_WHITE, 2);
+
+	char f_unit[12];
+	sprintf(f_unit, "%s/%c", vol_units[vol_unit_indices[current_fluid_idx]],
+			(flow_time_indices[current_fluid_idx] == 0 ? 's' : 'h'));
+	Draw_Unit_Button(unit_x, 148, f_unit);
+
+	// --- ROW 4: BREAK TIME ---
+	TFT_DrawString(10, 190, "TIME:", ILI9341_COLOR_WHITE, 2);
+	TFT_FillRect_Fast(90, 185, 110, 25, 0x4208); // Grey Box
+	snprintf(buf, 11, "%.1f", time_breaks[current_fluid_idx]);
+	TFT_DrawString(95, 190, buf, ILI9341_COLOR_WHITE, 2);
+	Draw_Unit_Button(unit_x, 188,
+			time_units[time_unit_indices[current_fluid_idx]]);
+
+	// --- NAVIGATION ---
+	// BACK Button
+	TFT_FillRect_Fast(10, 215, 70, 22, 0x8000);
+	TFT_DrawString(30, 222, "BACK", ILI9341_COLOR_WHITE, 1);
+
+	// RUN Button (Now triggers Confirmation instead of instant start)
+	TFT_FillRect_Fast(250, 215, 65, 22, 0x0400);
+	TFT_DrawString(270, 222, "RUN", ILI9341_COLOR_WHITE, 1);
+}
+
+// For unit button update
+void Draw_Unit_Button(uint16_t x, uint16_t y, const char *label) {
+	// Draw the button body
+	TFT_DrawButton(x, y, 55, 22, "", ILI9341_COLOR_BLUE);
+	// Draw the text (centered slightly)
+	TFT_DrawString(x + 6, y + 7, (char*) label, ILI9341_COLOR_WHITE, 1);
+}
+
+void Draw_Finished_Screen(void) {
+	// 1. Clean Background
+	TFT_FillRect_Fast(0, 0, 320, 240, 0x0841);
+
+	// 2. Classy Gold/Halo Header
+	TFT_FillRect_Fast(0, 0, 320, 50, 0x0000); // Black top bar
+	TFT_FillRect_Fast(0, 50, 320, 2, ILI9341_COLOR_HALO); // Accent separator line
+	TFT_DrawString(45, 18, "SYNTHESIS COMPLETE", ILI9341_COLOR_HALO, 2);
+
+	// 3. Central Confirmation Icon/Text
+	// Draw a stylized checkmark or box
+	TFT_DrawRect(85, 80, 120, 40, ILI9341_COLOR_HALO);
+	TFT_DrawString(90, 92, "SYSTEM OK", ILI9341_COLOR_WHITE, 2);
+
+	TFT_DrawString(55, 135, "All fluids dispensed",
+	ILI9341_COLOR_WHITE, 2);
+	TFT_DrawString(55, 155, "successfully",
+	ILI9341_COLOR_WHITE, 2);
+
+	// 4. Elegant Action Buttons (Outlined style to match your theme)
+	// SAVE RECIPE Button
+	TFT_DrawRect(30, 185, 120, 40, ILI9341_COLOR_WHITE);
+	TFT_DrawString(48, 198, "SAVE RECIPE", ILI9341_COLOR_BLACK, 1);
+
+	// EXIT Button
+	TFT_DrawRect(170, 185, 120, 40, ILI9341_COLOR_HALO);
+	TFT_DrawString(215, 198, "EXIT", ILI9341_COLOR_BLACK, 1);
+}
+
+void Draw_Main_Menu(void) {
+	// Ensure the entire 320x240 area is reset to the background color
+	TFT_FillScreen(ILI9341_COLOR_GRAY);
+
+	TFT_DrawButton(20, 40, 280, 60, "", ILI9341_COLOR_BLUE);
+	TFT_DrawString(40, 60, "START NEW", ILI9341_COLOR_WHITE, 2);
+
+	TFT_DrawButton(20, 140, 280, 60, "", ILI9341_COLOR_BLUE);
+	TFT_DrawString(40, 160, "EXISTING", ILI9341_COLOR_WHITE, 2);
+}
+/* ------------------------------ MOTOR AND UI BRIDGE FUNCTION ------------------------------ */
+//Test Simulation
+void SimulateFullSynthesis(void) {
+	currentState = MENU_RUNNING;
+
+	// 1. Initial UI Update
+	TFT_FillRect_Fast(0, 0, 320, 240, 0x0841);
+	TFT_DrawString(40, 100, "INITIALIZING SIMULATION", ILI9341_COLOR_WHITE, 2);
+	HAL_Delay(1000);
+
+	Draw_Running_Screen_Static();
+
+	// Define the Card Background color for clean erasures
+	uint16_t card_bg = 0x7BEF;
+
+	for (int i = 0; i < 8; i++) {
+		if (volume_mls[i] <= 0.01f)
+			continue;
+
+		// Update UI Values
+		// Inside the for (int i = 0; i < 8; i++) loop
+		Update_Running_Screen_Values(i + 1,         // Syringe Label (#1, #2...)
+		volume_mls[i],                  // Current Volume
+				flow_rates[i],                  // Current Flow
+				i + 1,                          // Progress (1 through 8)
+				vol_unit_indices[i],            // Volume unit index
+				flow_time_indices[i]            // Flow time index
+				);
+
+		// --- PHASE 1: SEEKING (Responsive) ---
+		TFT_FillRect_Fast(90, 145, 160, 10, card_bg); // Use card_bg, not Gray
+		TFT_DrawString(90, 145, "SIMULATING: SEEKING...", 0xF800, 1);
+
+		// Instead of HAL_Delay(800), check pause every 100ms
+		for (int j = 0; j < 8; j++) {
+			if (Handle_Pause_Condition())
+				return;
+			HAL_Delay(100);
+		}
+
+		// --- PHASE 2: DISPENSING (Responsive) ---
+		TFT_FillRect_Fast(90, 145, 160, 10, card_bg);
+		TFT_DrawString(90, 145, "SIMULATING: DISPENSING...", 0xF800, 1);
+
+		// Split 2000ms into 20 checks for a highly responsive pause button
+		for (int j = 0; j < 20; j++) {
+			if (Handle_Pause_Condition())
+				return;
+			HAL_Delay(100);
+		}
+
+		// --- PHASE 3: RETRACTING (Responsive) ---
+		TFT_FillRect_Fast(90, 145, 160, 10, card_bg);
+		TFT_DrawString(90, 145, "SIMULATING: RETRACTING...", 0xF800, 1);
+
+		for (int j = 0; j < 8; j++) {
+			if (Handle_Pause_Condition())
+				return;
+			HAL_Delay(100);
+		}
+
+		// --- PHASE 4: WAIT FOR BREAK ---
+		if (time_breaks[i] > 0) {
+			TFT_FillRect_Fast(90, 145, 160, 10, card_bg);
+			char break_msg[30];
+			sprintf(break_msg, "WAITING: %ds", (int) time_breaks[i]);
+			TFT_DrawString(90, 145, break_msg, ILI9341_COLOR_HALO, 1);
+
+			// Check pause once per second of the break
+			for (int j = 0; j < (int) time_breaks[i]; j++) {
+				if (Handle_Pause_Condition())
+					return;
+				HAL_Delay(1000);
+			}
+		}
+
+		// --- PHASE 5: ROTATE ---
+		if (i < 7) {
+			TFT_FillRect_Fast(90, 145, 160, 10, card_bg);
+			TFT_DrawString(90, 145, "SIMULATING: ROTATING TRAY", 0xF800, 1);
+			for (int j = 0; j < 10; j++) {
+				if (Handle_Pause_Condition())
+					return;
+				HAL_Delay(100);
+			}
+		}
+	}
+
+	// --- TRANSITION TO FINISHED STATE ---
+	currentState = MENU_FINISHED;
+	Draw_Finished_Screen();
+}
+
+// Actual Hardware
+void RunFullSynthesis(void) {
+	uint16_t card_bg = 0x7BEF;
+	const int MAX_SAFE_STEPS = 152000; //19mm
+
+	// --- NEW: PRE-VALIDATION LOOP ---
+	for (int i = 0; i < 8; i++) {
+		// Only check slots that aren't empty
+		if (volume_mls[i] > 0.01f) {
+			StepperOutput check = CalculateStepper(syringe_diams[i],
+					diam_unit_indices[i], volume_mls[i], vol_unit_indices[i],
+					flow_rates[i], flow_time_indices[i]);
+
+			if (check.steps > MAX_SAFE_STEPS) {
+				// Display Error Screen
+				TFT_FillScreen(COLOR_RED);
+				TFT_DrawString(40, 60, "INVALID VALUE DETECTED",
+				ILI9341_COLOR_WHITE, 2);
+
+				char err_msg[40];
+				sprintf(err_msg, "SYRINGE %d: %d STEPS", i + 1, check.steps);
+				TFT_DrawString(40, 100, err_msg, ILI9341_COLOR_BLACK, 1);
+				TFT_DrawString(40, 130, "EXCEEDS LIMIT!", ILI9341_COLOR_BLACK,
+						1);
+
+				HAL_Delay(3000); // Let user read the error
+
+				// Send user back to the edit screen for that specific syringe
+				current_fluid_idx = i;
+				currentState = MENU_NEW_SYNTHESIS;
+				Draw_New_Synthesis_Menu();
+				return; // Kill the synthesis before it starts
+			}
+		}
+	}
+
+	//Safety check passed
+	currentState = MENU_RUNNING;
+
+	// 1. Initial UI & Homing
+	TFT_FillRect_Fast(0, 0, 320, 240, 0x0841);
+	TFT_DrawString(45, 110, "HOMING SYSTEM", ILI9341_COLOR_WHITE, 3);
+
+	HAL_GPIO_WritePin(EN_TRAY_PORT, EN_TRAY_PIN, GPIO_PIN_RESET); // Enable Tray
+	HomeTray_Ramped(0.15f);
+
+	// Draw the static layout once
+	Draw_Running_Screen_Static();
+
+	for (int i = 0; i < 8; i++) {
+		// Skip empty slots
+		if (volume_mls[i] <= 0.01f) {
+			RotateTray45_Trapezoidal(min_tray_rps, max_tray_rps);
+			continue;
+		}
+
+		// --- LIVE UI UPDATE ---
+		Update_Running_Screen_Values(i + 1,         // Syringe Label (#1, #2...)
+		volume_mls[i],                  // Current Volume
+				flow_rates[i],                  // Current Flow
+				i + 1,                          // Progress (1 through 8)
+				vol_unit_indices[i],            // Volume unit index
+				flow_time_indices[i]            // Flow time index
+				);
+
+		// --- PHASE 1: CALCULATING ---
+		// Using the global index arrays you've already defined in your UI
+		StepperOutput pump = CalculateStepper(syringe_diams[i], // float diameter
+				diam_unit_indices[i],        // int diam_idx
+				volume_mls[i],               // float volume
+				vol_unit_indices[i],         // int vol_idx
+				flow_rates[i],               // float flowrate
+				flow_time_indices[i]         // int flow_time_idx
+				);
+
+		// --- PHASE 2: SEEKING ---
+		TFT_FillRect_Fast(90, 145, 160, 10, card_bg);
+		TFT_DrawString(90, 145, "SEEKING SYRINGE...", 0xF800, 1);
+
+		//Move down
+		if (pump.steps_per_second <= movedown_speed) {
+			SeekSyringeButt(movedown_speed); //hardware
+		} else {
+			SeekSyringeButt(pump.steps_per_second); //hardware
+		}
+
+		TFT_FillRect_Fast(90, 145, 160, 10, card_bg);
+		TFT_DrawString(90, 145, "DISPENSING...", 0xF800, 1);
+		DriveStepper(pump.steps, pump.steps_per_second, 1);
+
+		// --- PHASE 3: RETRACTING ---
+		TFT_FillRect_Fast(90, 145, 160, 10, card_bg);
+		TFT_DrawString(90, 145, "RETRACTING...", 0xF800, 1);
+		RetractToTop(moveup_speed);
+
+		// --- PHASE 4: RESPONSIVE BREAK ---
+		if (time_breaks[i] > 0) {
+			TFT_FillRect_Fast(90, 145, 160, 10, card_bg);
+			//Logic  for different units in timebreak
+			//case: min
+			if (time_unit_indices[i] == 1) {
+				new_time = time_breaks[i] * 60;
+			}
+			//case: hr
+			else if (time_unit_indices[i] == 2) {
+				new_time = time_breaks[i] * 3600;
+			}
+			for (int seconds = 0; seconds < (int) new_time; seconds++) {
+				char break_msg[20];
+				sprintf(break_msg, "WAITING: %ds", (int) new_time - seconds);
+				TFT_DrawString(90, 145, break_msg, ILI9341_COLOR_HALO, 1);
+
+				HAL_Delay(1000);
+
+				TFT_FillRect_Fast(90, 145, 160, 10, card_bg); // Clear for next second
+			}
+		}
+
+		// --- PHASE 5: ROTATE ---
+		if (i < 7) {
+			TFT_FillRect_Fast(90, 145, 160, 10, card_bg);
+			TFT_DrawString(90, 145, "ROTATING TRAY...", 0xF800, 1);
+			RotateTray45_Trapezoidal(min_tray_rps, max_tray_rps);
+			HAL_Delay(500); // Short settle delay
+
+		}
+	}
+
+	// --- SUCCESS COMPLETION ---
+	currentState = MENU_FINISHED;
+	Draw_Finished_Screen();
+	HAL_GPIO_WritePin(EN_TRAY_PORT, EN_TRAY_PIN, GPIO_PIN_SET); // Disable Motors
+	return;
+}
+/* USER CODE END 0 */
+
+/**
+ * @brief  The application entry point.
+ * @retval int
+ */
+int main(void) {
+	/* USER CODE BEGIN 1 */
+
+	/* USER CODE END 1 */
+	HAL_Init();
+	SystemClock_Config();
+	MX_GPIO_Init();
+	MX_USART2_UART_Init();
+	MX_SPI1_Init();
+	MX_TIM3_Init();
+	/* USER CODE BEGIN 2 */
+	// 1. Initial Hardware Reset & Init
+	HAL_GPIO_WritePin(TFT_CS_GPIO_Port, TFT_CS_Pin, GPIO_PIN_SET);
+	HAL_GPIO_WritePin(TFT_RST_GPIO_Port, TFT_RST_Pin, GPIO_PIN_RESET);
+	HAL_Delay(100);
+	HAL_GPIO_WritePin(TFT_RST_GPIO_Port, TFT_RST_Pin, GPIO_PIN_SET);
+	HAL_Delay(100);
+
+	TFT_WriteCmd(0x01);
+	HAL_Delay(150);
+	TFT_WriteCmd(0x36);
+	TFT_WriteData(0x28); // Landscape
+	TFT_WriteCmd(0x11);
+	HAL_Delay(150);
+	TFT_WriteCmd(0x3A);
+	TFT_WriteData(0x55);
+	TFT_WriteCmd(0x29);
+
+	// Load permanent recipes from flash [CRITICAL DO NOT DELETE]
+	LoadRecipesFromFlash();
+
+	// Logo
+	TFT_FillScreen(ILI9341_COLOR_BLUE);
+	TFT_DrawString(70, 50, "DABAM", ILI9341_COLOR_HALO, 6);
+	HAL_Delay(1000);
+
+	// Progress bar
+	TFT_DrawString(60, 160, "Initializing System...", ILI9341_COLOR_WHITE, 1);
+	for (int i = 0; i < 200; i += 10) {
+		TFT_DrawRect(60, 180, i, 10, ILI9341_COLOR_HALO);
+		HAL_Delay(50);
+	}
+	HAL_Delay(300);
+
+	// Countdown to home
+	// Use the fast fill for the background bar
+	TFT_FillRect_Fast(40, 160, 260, 30, ILI9341_COLOR_BLUE);
+	TFT_DrawString(40, 170, "Homing beginning in ", ILI9341_COLOR_WHITE, 2);
+
+	for (int i = 2; i >= 0; i--) {
+		char num_buf[2];
+		sprintf(num_buf, "%d", i);
+		uint16_t num_x = 280;
+
+		// Clear ONLY the small box where the number lives using fast fill
+		TFT_FillRect_Fast(num_x, 170, 20, 30, ILI9341_COLOR_BLUE);
+		TFT_DrawString(num_x, 170, num_buf, ILI9341_COLOR_WHITE, 2);
+		HAL_Delay(1000);
+	}
+
+	//Safety box
+	TFT_FillRect_Fast(10, 10, 300, 220, 0xF800); //  Red Fill
+	TFT_DrawRect(12, 12, 296, 216, ILI9341_COLOR_WHITE); // White Border
+	TFT_DrawString(50, 40, "WARNING:", 0xF800, 5);
+	TFT_DrawString(100, 90, "HOMING", 0xF800, 3);
+	TFT_DrawString(40, 150, "KEEP CLEAR OF DEVICE", 0xF800, 2);
+
+	//Delay till screen visible
+	HAL_Delay(1000);
+
+	if (sim == 0) {
+		//Start hardware homing
+		RetractToTop_old(20000.0f); //lead screw to home position
+		HAL_Delay(1000);
+		HomeTray_Ramped(0.15f);
+		HAL_Delay(2000);
+		// Disable Tray
+		HAL_GPIO_WritePin(EN_TRAY_PORT, EN_TRAY_PIN, GPIO_PIN_SET);
+	}
+	//To main menu
+	Draw_Main_Menu();
+	/* USER CODE END 2 */
+
+	/* Infinite loop */
+	/* USER CODE BEGIN WHILE */
+	while (1) {
+		char *keys[] = { "Q", "W", "E", "R", "T", "Y", "U", "I", "O", "P", "A",
+				"S", "D", "F", "G", "H", "J", "K", "L", "<", "Z", "X", "C", "V",
+				"B", "N", "M", " ", "_", "OK" };
+
+		//if (currentState == MENU_FINISHED) {}
+
+		// 2. TOUCH INTERACTION LOGIC
+		if (HAL_GPIO_ReadPin(GPIOC, TOUCH_IRQ_Pin) == GPIO_PIN_RESET) {
+			uint16_t tx, ty;
+			Touch_GetXY(&tx, &ty);
+
+			// --- 1. MAIN MENU ---
+			if (currentState == MENU_MAIN) {
+				// 1. "START NEW" Button (Y: 40 to 100)
+				if (tx > 20 && tx < 300 && ty > 40 && ty < 100) {
+					// Reset buffers for a fresh start
+					Reset_All_Values();
+					for (int i = 0; i < 8; i++) {
+						volume_mls[i] = 0.0f;
+						time_breaks[i] = 0.0f;
+					}
+					current_fluid_idx = 0;
+					currentState = MENU_NEW_SYNTHESIS;
+					Draw_New_Synthesis_Menu();
+					HAL_Delay(300);
+				}
+
+				// 2. "EXISTING" Button (Y: 140 to 200)
+				else if (tx > 20 && tx < 300 && ty > 140 && ty < 200) {
+					currentState = MENU_LOAD;
+					Draw_Load_Recipe_Menu();
+					HAL_Delay(300);
+				}
+			}
+			// --- NEW SYNTHESIS MENU ---
+			else if (currentState == MENU_NEW_SYNTHESIS) {
+				if (ty >= 25 && ty <= 55) { // Tabs
+					for (int i = 0; i < 8; i++) {
+						int bx_start = 95 + (i * 28);
+						int bx_end = bx_start + 24;
+						if (tx >= bx_start && tx <= bx_end) {
+							if (current_fluid_idx != i) {
+								current_fluid_idx = i;
+								Update_Fluid_Selection(i);
+								HAL_Delay(250);
+							}
+						}
+					}
+				} else if (tx >= 90 && tx <= 195) { // Value Boxes
+					if (ty >= 65 && ty <= 92)
+						currentEdit = EDIT_DIAM;
+					else if (ty >= 105 && ty <= 132)
+						currentEdit = EDIT_VOL;
+					else if (ty >= 145 && ty <= 172)
+						currentEdit = EDIT_FLOW;
+					else if (ty >= 185 && ty <= 212)
+						currentEdit = EDIT_TIME;
+
+					if (currentEdit != EDIT_NONE) {
+						currentState = MENU_NUMPAD;
+						numpad_buffer[0] = '\0';
+						Draw_Numpad();
+						HAL_Delay(300);
+					}
+				} else if (tx >= 210 && tx <= 270) { // Units
+					char flow_buf[12];
+					if (ty >= 65 && ty <= 92) {
+						diam_unit_indices[current_fluid_idx] =
+								(diam_unit_indices[current_fluid_idx] + 1) % 2;
+						Draw_Unit_Button(210, 68,
+								diam_units[diam_unit_indices[current_fluid_idx]]);
+					} else if (ty >= 105 && ty <= 132) {
+						vol_unit_indices[current_fluid_idx] =
+								(vol_unit_indices[current_fluid_idx] + 1) % 2;
+						Draw_Unit_Button(210, 108,
+								vol_units[vol_unit_indices[current_fluid_idx]]);
+						sprintf(flow_buf, "%s/%c",
+								vol_units[vol_unit_indices[current_fluid_idx]],
+								(flow_time_indices[current_fluid_idx] == 0 ?
+										's' : 'h'));
+						Draw_Unit_Button(210, 148, flow_buf);
+					} else if (ty >= 145 && ty <= 172) {
+						flow_time_indices[current_fluid_idx] =
+								(flow_time_indices[current_fluid_idx] + 1) % 2;
+						sprintf(flow_buf, "%s/%c",
+								vol_units[vol_unit_indices[current_fluid_idx]],
+								(flow_time_indices[current_fluid_idx] == 0 ?
+										's' : 'h'));
+						Draw_Unit_Button(210, 148, flow_buf);
+					} else if (ty >= 185 && ty <= 212) {
+						time_unit_indices[current_fluid_idx] =
+								(time_unit_indices[current_fluid_idx] + 1) % 3;
+						Draw_Unit_Button(210, 188,
+								time_units[time_unit_indices[current_fluid_idx]]);
+					}
+					HAL_Delay(200);
+				} else if (ty >= 210) { //Back button
+					if (tx >= 5 && tx <= 100) {
+						currentState = MENU_MAIN;
+						Draw_Main_Menu();
+						HAL_Delay(300);
+					} else if (tx >= 220 && tx <= 315) { //Run button
+						currentState = MENU_CONFIRM;
+						Draw_Confirm_Popup();
+						HAL_Delay(300);
+					}
+				}
+			} else if (currentState == MENU_CONFIRM) { //Confirmation of action menu
+				// YES Button
+				if (tx > 60 && tx < 140 && ty > 120 && ty < 160) {
+					if (sim == 0)
+						RunFullSynthesis();
+					else
+						SimulateFullSynthesis();
+					HAL_Delay(300);
+				}
+
+				// NO Button
+				else if (tx > 180 && tx < 260 && ty > 120 && ty < 160) {
+					currentState = MENU_NEW_SYNTHESIS;
+					Draw_New_Synthesis_Menu();
+					HAL_Delay(300);
+				}
+			}
+
+			// --- 3. NUMPAD MENU ---
+			else if (currentState == MENU_NUMPAD) {
+				if (ty >= 50 && ty < 210 && tx < 315) {
+					int col = tx / 105;
+					int row = (ty - 50) / 40;
+					int idx = (row * 3) + col;
+					int localX = tx % 105;
+					int localY = (ty - 50) % 40;
+
+					if (idx >= 0 && idx < 12 && localX < 95 && localY < 35) {
+						char *keys[] = { "1", "2", "3", "4", "5", "6", "7", "8",
+								"9", ".", "0", "<-" };
+						if (strcmp(keys[idx], "<-") == 0) {
+							int len = strlen(numpad_buffer);
+							if (len > 0)
+								numpad_buffer[len - 1] = '\0';
+						} else if (strlen(numpad_buffer) < 9) {
+							strcat(numpad_buffer, keys[idx]);
+						}
+						TFT_FillRect_Fast(11, 6, 298, 33, ILI9341_COLOR_BLACK);
+						TFT_DrawString(20, 15, numpad_buffer,
+						ILI9341_COLOR_WHITE, 2);
+						HAL_Delay(200);
+					}
+				} else if (ty >= 210 && tx > 10 && tx < 310) {
+					float val = atof(numpad_buffer);
+					if (currentEdit == EDIT_DIAM)
+						syringe_diams[current_fluid_idx] = val;
+					else if (currentEdit == EDIT_VOL)
+						volume_mls[current_fluid_idx] = val;
+					else if (currentEdit == EDIT_FLOW)
+						flow_rates[current_fluid_idx] = val;
+					else if (currentEdit == EDIT_TIME)
+						time_breaks[current_fluid_idx] = val;
+
+					currentState = MENU_NEW_SYNTHESIS;
+					Draw_New_Synthesis_Menu();
+					HAL_Delay(300);
+				}
+			}
+
+			// --- 4. FINISHED MENU ---
+			else if (currentState == MENU_FINISHED) {
+				// SAVE button clicked
+				if (ty >= 190 && ty <= 225 && tx >= 30 && tx <= 150) {
+					keyboard_buffer[0] = '\0'; // Clear the name buffer
+					currentState = MENU_KEYBOARD;
+					Draw_Keyboard();
+					HAL_Delay(300);
+				}
+				// EXIT button clicked
+				else if (ty >= 190 && ty <= 225 && tx >= 170 && tx <= 290) {
+					currentState = MENU_MAIN;
+					Draw_Main_Menu();
+					HAL_Delay(300);
+				}
+			}
+
+			// --- STATE: KEYBOARD (Naming the Recipe) ---
+			else if (currentState == MENU_KEYBOARD) {
+				// 1. Calculate which key was pressed
+				int col = (tx - 5) / 31;
+				int row = (ty - 85) / 45;
+				int idx = (row * 10) + col;
+
+				if (idx >= 0 && idx < 30) {
+					// --- Special Case: BACKSPACE ---
+					if (strcmp(keys[idx], "<") == 0) {
+						int len = strlen(keyboard_buffer);
+						if (len > 0)
+							keyboard_buffer[len - 1] = '\0';
+					}
+					// --- Special Case: SAVE/OK ---
+					else if (strcmp(keys[idx], "OK") == 0) {
+						if (strlen(keyboard_buffer) > 0
+								&& saved_recipe_count < 5) {
+
+							// --- THE DATA SAVE (Must happen before switching menus) ---
+							strncpy(recipeDatabase[saved_recipe_count].name,
+									keyboard_buffer, 15);
+							recipeDatabase[saved_recipe_count].name[15] = '\0';
+
+							for (int i = 0; i < 8; i++) {
+								recipeDatabase[saved_recipe_count].syringe_diams[i] =
+										syringe_diams[i];
+								recipeDatabase[saved_recipe_count].volume_mls[i] =
+										volume_mls[i];
+								recipeDatabase[saved_recipe_count].flow_rates[i] =
+										flow_rates[i];
+								recipeDatabase[saved_recipe_count].time_breaks[i] =
+										time_breaks[i];
+								recipeDatabase[saved_recipe_count].diam_unit_indices[i] =
+										diam_unit_indices[i];
+								recipeDatabase[saved_recipe_count].vol_unit_indices[i] =
+										vol_unit_indices[i];
+								recipeDatabase[saved_recipe_count].flow_time_indices[i] =
+										flow_time_indices[i];
+								recipeDatabase[saved_recipe_count].time_unit_indices[i] =
+										time_unit_indices[i];
+							}
+
+							saved_recipe_count++; // Increment the counter
+
+							// --- Save to Flash [CRITICAL] ---
+							SaveRecipesToFlash();
+
+							// 2. SHOW SUCCESS FEEDBACK
+							TFT_FillRect_Fast(10, 30, 300, 40, 0x07E0); // Green box
+							TFT_DrawString(85, 42, "RECIPE SAVED!",
+							ILI9341_COLOR_BLACK, 2);
+
+							// 3. WAIT FOR USER TO SEE IT
+							HAL_Delay(800);
+
+							// 4. CRITICAL: WAIT FOR FINGER RELEASE
+							// This stops the "OK" touch from being interpreted as a click on the next menu
+							while (HAL_GPIO_ReadPin(GPIOC, TOUCH_IRQ_Pin)
+									== GPIO_PIN_RESET)
+								;
+
+							// If ghosting
+							//TFT_FillScreen(ILI9341_COLOR_GRAY);
+
+							// 6. TRANSITION
+							currentState = MENU_MAIN;
+							Draw_Main_Menu();
+							continue;
+						}
+					}
+					// --- Regular Characters ---
+					else {
+						if (strlen(keyboard_buffer) < 15) {
+							strcat(keyboard_buffer, keys[idx]);
+						}
+					}
+
+					if (currentState == MENU_KEYBOARD) {
+						TFT_FillRect_Fast(11, 36, 298, 38, 0x4208); // The Grey Box
+						TFT_DrawString(20, 47, keyboard_buffer,
+						ILI9341_COLOR_WHITE, 2);
+						HAL_Delay(250);
+					}
+				}
+			}
+			//Load saved recipes back into synthesis menu
+			else if (currentState == MENU_LOAD) {
+				// Back Button
+				if (ty >= 200 && tx >= 100 && tx <= 220) {
+					currentState = MENU_MAIN;
+					Draw_Main_Menu();
+					HAL_Delay(300);
+				}
+
+				// Check for Recipe Slot Clicks
+				if (saved_recipe_count > 0) {
+
+					for (int i = 0; i < saved_recipe_count; i++) {
+						int y_start = 50 + (i * 38); // Adjusted to match the Draw function
+						int y_end = y_start + 32;
+
+						// --- CHECK DELETE CROSS (X) HITBOX ---
+						if (tx > 250 && tx < 310 && ty >= y_start
+								&& ty <= y_end) {
+							// Shift array to remove item i
+							for (int j = i; j < saved_recipe_count - 1; j++) {
+								recipeDatabase[j] = recipeDatabase[j + 1];
+							}
+							saved_recipe_count--;
+							SaveRecipesToFlash();
+							Draw_Load_Recipe_Menu();
+							HAL_Delay(300);
+							break;
+						}
+
+						// --- CHECK LOAD RECIPE HITBOX ---
+						if (tx >= 10 && tx <= 240 && ty >= y_start
+								&& ty <= y_end) {
+							Load_Recipe_To_System(i);
+							currentState = MENU_NEW_SYNTHESIS;
+							Draw_New_Synthesis_Menu();
+							HAL_Delay(300);
+							break;
+						}
+					}
+				}
+			}
+		}
+	}
+}
+/* Touch debugger
+ if (HAL_GPIO_ReadPin(GPIOC, TOUCH_IRQ_Pin) == GPIO_PIN_RESET) {
+ uint16_t tx, ty;
+
+ // Get Raw values manually first for debugging
+ uint16_t rawX = Touch_ReadRaw(0xD0);
+ uint16_t rawY = Touch_ReadRaw(0x90);
+
+ // Call your existing function
+ Touch_GetXY(&tx, &ty);
+
+ // Print to screen
+ char debug_buf[64];
+ TFT_FillRect_Fast(0, 0, 320, 20, ILI9341_COLOR_BLACK); // Clear top bar
+ sprintf(debug_buf, "RawX:%d RawY:%d | X:%d Y:%d", rawX, rawY, tx, ty);
+ TFT_DrawString(5, 5, debug_buf, ILI9341_COLOR_YELLOW, 1);
+
+ HAL_Delay(100); // Prevent flicker
+ }*/
+
+/**
+ * @brief System Clock Configuration
+ * @retval None
+ */
+void SystemClock_Config(void) {
+	RCC_OscInitTypeDef RCC_OscInitStruct = { 0 };
+	RCC_ClkInitTypeDef RCC_ClkInitStruct = { 0 };
+
+	/** Configure the main internal regulator output voltage
+	 */
+	__HAL_RCC_PWR_CLK_ENABLE();
+	__HAL_PWR_VOLTAGESCALING_CONFIG(PWR_REGULATOR_VOLTAGE_SCALE2);
+
+	/** Initializes the RCC Oscillators according to the specified parameters
+	 * in the RCC_OscInitTypeDef structure.
+	 */
+	RCC_OscInitStruct.OscillatorType = RCC_OSCILLATORTYPE_HSI;
+	RCC_OscInitStruct.HSIState = RCC_HSI_ON;
+	RCC_OscInitStruct.HSICalibrationValue = RCC_HSICALIBRATION_DEFAULT;
+	RCC_OscInitStruct.PLL.PLLState = RCC_PLL_ON;
+	RCC_OscInitStruct.PLL.PLLSource = RCC_PLLSOURCE_HSI;
+	RCC_OscInitStruct.PLL.PLLM = 16;
+	RCC_OscInitStruct.PLL.PLLN = 336;
+	RCC_OscInitStruct.PLL.PLLP = RCC_PLLP_DIV4;
+	RCC_OscInitStruct.PLL.PLLQ = 7;
+	if (HAL_RCC_OscConfig(&RCC_OscInitStruct) != HAL_OK) {
+		Error_Handler();
+	}
+
+	/** Initializes the CPU, AHB and APB buses clocks
+	 */
+	RCC_ClkInitStruct.ClockType = RCC_CLOCKTYPE_HCLK | RCC_CLOCKTYPE_SYSCLK
+			| RCC_CLOCKTYPE_PCLK1 | RCC_CLOCKTYPE_PCLK2;
+	RCC_ClkInitStruct.SYSCLKSource = RCC_SYSCLKSOURCE_PLLCLK;
+	RCC_ClkInitStruct.AHBCLKDivider = RCC_SYSCLK_DIV1;
+	RCC_ClkInitStruct.APB1CLKDivider = RCC_HCLK_DIV2;
+	RCC_ClkInitStruct.APB2CLKDivider = RCC_HCLK_DIV1;
+
+	if (HAL_RCC_ClockConfig(&RCC_ClkInitStruct, FLASH_LATENCY_2) != HAL_OK) {
+		Error_Handler();
+	}
+}
+
+/**
+ * @brief SPI1 Initialization Function
+ * @param None
+ * @retval None
+ */
+static void MX_SPI1_Init(void) {
+
+	/* USER CODE BEGIN SPI1_Init 0 */
+
+	/* USER CODE END SPI1_Init 0 */
+
+	/* USER CODE BEGIN SPI1_Init 1 */
+
+	/* USER CODE END SPI1_Init 1 */
+	/* SPI1 parameter configuration*/
+	hspi1.Instance = SPI1;
+	hspi1.Init.Mode = SPI_MODE_MASTER;
+	hspi1.Init.Direction = SPI_DIRECTION_2LINES;
+	hspi1.Init.DataSize = SPI_DATASIZE_8BIT;
+	hspi1.Init.CLKPolarity = SPI_POLARITY_LOW;
+	hspi1.Init.CLKPhase = SPI_PHASE_1EDGE;
+	hspi1.Init.NSS = SPI_NSS_SOFT;
+	hspi1.Init.BaudRatePrescaler = SPI_BAUDRATEPRESCALER_64;
+	hspi1.Init.FirstBit = SPI_FIRSTBIT_MSB;
+	hspi1.Init.TIMode = SPI_TIMODE_DISABLE;
+	hspi1.Init.CRCCalculation = SPI_CRCCALCULATION_DISABLE;
+	hspi1.Init.CRCPolynomial = 10;
+	if (HAL_SPI_Init(&hspi1) != HAL_OK) {
+		Error_Handler();
+	}
+	/* USER CODE BEGIN SPI1_Init 2 */
+
+	/* USER CODE END SPI1_Init 2 */
+
+}
+
+/**
+ * @brief TIM3 Initialization Function
+ * @param None
+ * @retval None
+ */
+static void MX_TIM3_Init(void) {
+
+	/* USER CODE BEGIN TIM3_Init 0 */
+
+	/* USER CODE END TIM3_Init 0 */
+
+	TIM_ClockConfigTypeDef sClockSourceConfig = { 0 };
+	TIM_MasterConfigTypeDef sMasterConfig = { 0 };
+
+	/* USER CODE BEGIN TIM3_Init 1 */
+
+	/* USER CODE END TIM3_Init 1 */
+	htim3.Instance = TIM3;
+	htim3.Init.Prescaler = 83;
+	htim3.Init.CounterMode = TIM_COUNTERMODE_UP;
+	htim3.Init.Period = 65535;
+	htim3.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
+	htim3.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_ENABLE;
+	if (HAL_TIM_Base_Init(&htim3) != HAL_OK) {
+		Error_Handler();
+	}
+	sClockSourceConfig.ClockSource = TIM_CLOCKSOURCE_INTERNAL;
+	if (HAL_TIM_ConfigClockSource(&htim3, &sClockSourceConfig) != HAL_OK) {
+		Error_Handler();
+	}
+	sMasterConfig.MasterOutputTrigger = TIM_TRGO_RESET;
+	sMasterConfig.MasterSlaveMode = TIM_MASTERSLAVEMODE_DISABLE;
+	if (HAL_TIMEx_MasterConfigSynchronization(&htim3, &sMasterConfig)
+			!= HAL_OK) {
+		Error_Handler();
+	}
+	/* USER CODE BEGIN TIM3_Init 2 */
+
+	/* USER CODE END TIM3_Init 2 */
+
+}
+
+/**
+ * @brief USART2 Initialization Function
+ * @param None
+ * @retval None
+ */
+static void MX_USART2_UART_Init(void) {
+
+	/* USER CODE BEGIN USART2_Init 0 */
+
+	/* USER CODE END USART2_Init 0 */
+
+	/* USER CODE BEGIN USART2_Init 1 */
+
+	/* USER CODE END USART2_Init 1 */
+	huart2.Instance = USART2;
+	huart2.Init.BaudRate = 115200;
+	huart2.Init.WordLength = UART_WORDLENGTH_8B;
+	huart2.Init.StopBits = UART_STOPBITS_1;
+	huart2.Init.Parity = UART_PARITY_NONE;
+	huart2.Init.Mode = UART_MODE_TX_RX;
+	huart2.Init.HwFlowCtl = UART_HWCONTROL_NONE;
+	huart2.Init.OverSampling = UART_OVERSAMPLING_16;
+	if (HAL_UART_Init(&huart2) != HAL_OK) {
+		Error_Handler();
+	}
+	/* USER CODE BEGIN USART2_Init 2 */
+
+	/* USER CODE END USART2_Init 2 */
+
+}
+
+/**
+ * @brief GPIO Initialization Function
+ * @param None
+ * @retval None
+ */
+static void MX_GPIO_Init(void) {
+	GPIO_InitTypeDef GPIO_InitStruct = { 0 };
+	/* USER CODE BEGIN MX_GPIO_Init_1 */
+
+	/* USER CODE END MX_GPIO_Init_1 */
+
+	/* GPIO Ports Clock Enable */
+	__HAL_RCC_GPIOC_CLK_ENABLE();
+	__HAL_RCC_GPIOH_CLK_ENABLE();
+	__HAL_RCC_GPIOA_CLK_ENABLE();
+	__HAL_RCC_GPIOB_CLK_ENABLE();
+	__HAL_RCC_GPIOD_CLK_ENABLE();
+
+	/*Configure GPIO pin Output Level */
+	HAL_GPIO_WritePin(GPIOB, TOUCH_CS_Pin | TFT_CS_Pin, GPIO_PIN_SET);
+
+	/*Configure GPIO pin Output Level */
+	HAL_GPIO_WritePin(TFT_DC_GPIO_Port, TFT_DC_Pin, GPIO_PIN_RESET);
+
+	/*Configure GPIO pin Output Level */
+	HAL_GPIO_WritePin(TFT_RST_GPIO_Port, TFT_RST_Pin, GPIO_PIN_SET);
+
+	/*Configure GPIO pin : B1_Pin */
+	GPIO_InitStruct.Pin = B1_Pin;
+	GPIO_InitStruct.Mode = GPIO_MODE_IT_FALLING;
+	GPIO_InitStruct.Pull = GPIO_NOPULL;
+	HAL_GPIO_Init(B1_GPIO_Port, &GPIO_InitStruct);
+
+	/*Configure GPIO pins : TOUCH_CS_Pin TFT_CS_Pin */
+	GPIO_InitStruct.Pin = TOUCH_CS_Pin | TFT_CS_Pin;
+	GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
+	GPIO_InitStruct.Pull = GPIO_NOPULL;
+	GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_VERY_HIGH;
+	HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
+
+	/*Configure GPIO pin : TOUCH_IRQ_Pin */
+	GPIO_InitStruct.Pin = TOUCH_IRQ_Pin;
+	GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
+	GPIO_InitStruct.Pull = GPIO_PULLUP;
+	HAL_GPIO_Init(TOUCH_IRQ_GPIO_Port, &GPIO_InitStruct);
+
+	/*Configure GPIO pin : TFT_DC_Pin */
+	GPIO_InitStruct.Pin = TFT_DC_Pin;
+	GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
+	GPIO_InitStruct.Pull = GPIO_NOPULL;
+	GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_VERY_HIGH;
+	HAL_GPIO_Init(TFT_DC_GPIO_Port, &GPIO_InitStruct);
+
+	/*Configure GPIO pin : TFT_RST_Pin */
+	GPIO_InitStruct.Pin = TFT_RST_Pin;
+	GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
+	GPIO_InitStruct.Pull = GPIO_NOPULL;
+	GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
+	HAL_GPIO_Init(TFT_RST_GPIO_Port, &GPIO_InitStruct);
+
+//MOTOR PINS CONFIG
+	GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
+	GPIO_InitStruct.Pull = GPIO_NOPULL;
+	GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_HIGH;
+
+// Lead Outputs
+	GPIO_InitStruct.Pin = STEP_LEAD_PIN | DIR_LEAD_PIN | EN_LEAD_PIN
+			| LEAD_M0_PIN | LEAD_M1_PIN | LEAD_M2_PIN;
+	HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
+
+// Tray Outputs
+	GPIO_InitStruct.Pin = STEP_TRAY_PIN | EN_TRAY_PIN;
+	HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
+	GPIO_InitStruct.Pin =
+	DIR_TRAY_PIN | TRAY_M0_PIN | TRAY_M1_PIN | TRAY_M2_PIN;
+	HAL_GPIO_Init(GPIOC, &GPIO_InitStruct);
+
+// Sensor Inputs
+	GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
+	GPIO_InitStruct.Pull = GPIO_PULLUP;
+	GPIO_InitStruct.Pin = LEAD_LIMIT_TOP_PIN | TRAY_HALL_PIN | SYRINGE_BUTT_PIN; // Note: Butt is PB2
+	HAL_GPIO_Init(GPIOC, &GPIO_InitStruct); // Re-init specific pins for PB if needed
+
+	GPIO_InitStruct.Pin = SYRINGE_BUTT_PIN;
+	HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
+
+	GPIO_InitStruct.Pin = LEAD_LIMIT_BTM_PIN;
+	HAL_GPIO_Init(GPIOD, &GPIO_InitStruct);
+
+// Set 1/16 Microstepping (M0:L, M1:L, M2:H)
+	HAL_GPIO_WritePin(LEAD_M0_PORT, LEAD_M0_PIN, GPIO_PIN_RESET);
+	HAL_GPIO_WritePin(LEAD_M1_PORT, LEAD_M1_PIN, GPIO_PIN_RESET);
+	HAL_GPIO_WritePin(LEAD_M2_PORT, LEAD_M2_PIN, GPIO_PIN_SET);
+
+	HAL_GPIO_WritePin(TRAY_M0_PORT, TRAY_M0_PIN, GPIO_PIN_RESET);
+	HAL_GPIO_WritePin(TRAY_M1_PORT, TRAY_M1_PIN, GPIO_PIN_RESET);
+	HAL_GPIO_WritePin(TRAY_M2_PORT, TRAY_M2_PIN, GPIO_PIN_SET);
+}
+/* USER CODE BEGIN MX_GPIO_Init_2 */
+
+/* USER CODE END MX_GPIO_Init_2 */
+
+/* USER CODE BEGIN 4 */
+void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim) {
+	if (htim->Instance == TIM3) {
+
+		// --- TRAY MOTOR LOGIC ---
+		if (tray_is_moving) {
+			uint8_t tray_stop_request = 0;
+
+			if (tray_homing) {
+				// PHASE 1: SENSOR SEARCH
+				// 1. Ensure we have cleared the magnet area (Debounce)
+				if (HAL_GPIO_ReadPin(TRAY_HALL_PORT, TRAY_HALL_PIN)
+						== GPIO_PIN_SET) {
+					tray_clear = 1;
+				}
+				// 2. Stop the moment we hit the magnet (Falling Edge)
+				if (tray_clear
+						&& HAL_GPIO_ReadPin(TRAY_HALL_PORT, TRAY_HALL_PIN)
+								== GPIO_PIN_RESET) {
+					tray_stop_request = 1;
+				}
+
+				// Safety Timeout: If 8000 steps pass without finding sensor, stop.
+				if (tray_steps_remaining-- <= 0)
+					tray_stop_request = 1;
+
+			} else {
+				// PHASE 2 & NORMAL MOVES: EXACT STEPS
+				if (tray_steps_remaining-- <= 0) {
+					tray_stop_request = 1;
+				}
+			}
+
+			if (tray_stop_request) {
+				tray_is_moving = 0;
+				HAL_TIM_Base_Stop_IT(&htim3);
+			} else {
+				HAL_GPIO_WritePin(STEP_TRAY_PORT, STEP_TRAY_PIN, GPIO_PIN_SET);
+				for (volatile int i = 0; i < 20; i++)
+					; // Pulse width
+				HAL_GPIO_WritePin(STEP_TRAY_PORT, STEP_TRAY_PIN,
+						GPIO_PIN_RESET);
+			}
+		}
+
+		// --- LEAD MOTOR LOGIC ---
+		else if (lead_is_moving) {
+			uint8_t lead_stop_request = 0;
+
+			// Limit Switch Safety
+			if (lead_dir == 1) { // Moving DOWN
+				if (HAL_GPIO_ReadPin(LEAD_LIMIT_BTM_PORT,
+				LEAD_LIMIT_BTM_PIN) == GPIO_PIN_RESET)
+					lead_stop_request = 1;
+				if (lead_mode == MOVE_SEEK_BUTT
+						&& HAL_GPIO_ReadPin(SYRINGE_BUTT_PORT,
+						SYRINGE_BUTT_PIN) == GPIO_PIN_RESET)
+					lead_stop_request = 1;
+			} else { // Moving UP
+				if (HAL_GPIO_ReadPin(LEAD_LIMIT_TOP_PORT,
+				LEAD_LIMIT_TOP_PIN) == GPIO_PIN_RESET)
+					lead_stop_request = 1;
+			}
+
+			// Step Counter
+			if (lead_mode == MOVE_EXACT_STEPS && lead_steps_remaining-- <= 0) {
+				lead_stop_request = 1;
+			}
+
+			if (lead_stop_request) {
+				lead_is_moving = 0;
+				HAL_TIM_Base_Stop_IT(&htim3);
+			} else {
+				HAL_GPIO_WritePin(STEP_LEAD_PORT, STEP_LEAD_PIN, GPIO_PIN_SET);
+				for (volatile int i = 0; i < 20; i++)
+					;
+				HAL_GPIO_WritePin(STEP_LEAD_PORT, STEP_LEAD_PIN,
+						GPIO_PIN_RESET);
+			}
+		}
+	}
+}
+
+/* USER CODE END 4 */
+
+/**
+ * @brief  This function is executed in case of error occurrence.
+ * @retval None
+ */
+void Error_Handler(void) {
+	/* USER CODE BEGIN Error_Handler_Debug */
+	/* User can add his own implementation to report the HAL error return state */
+	__disable_irq();
+	while (1) {
+	}
+	/* USER CODE END Error_Handler_Debug */
+}
+#ifdef USE_FULL_ASSERT
+/**
+  * @brief  Reports the name of the source file and the source line number
+  *         where the assert_param error has occurred.
+  * @param  file: pointer to the source file name
+  * @param  line: assert_param error line source number
+  * @retval None
+  */
+void assert_failed(uint8_t *file, uint32_t line)
+{
+  /* USER CODE BEGIN 6 */
+  /* User can add his own implementation to report the file name and line number,
+     ex: printf("Wrong parameters value: file %s on line %d\r\n", file, line) */
+  /* USER CODE END 6 */
+}
+#endif /* USE_FULL_ASSERT */
