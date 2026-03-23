@@ -13,4 +13,4 @@ The system utilizes the following components
 
 **SYMPOSIUM POSTER**
 <img width="1113" height="834" alt="image" src="https://github.com/user-attachments/assets/1b2167cf-efbf-488b-be29-0add9004efc1" />
-<img width="1113" height="834" alt="image" src="https://github.com/user-attachments/assets/1b2167cf-efbf-488b-be29-0add9004efc1" />
+
